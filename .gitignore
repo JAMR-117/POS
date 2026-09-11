@@ -1,0 +1,27 @@
+﻿# Binarios y builds
+bin/
+obj/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Dependencias y compilación
+node_modules/
+build/
+.dart_tool/
+.gradle/
+
+# Entornos y datos locales
+*.env
+*.sqlite
+*.db
+*.db-journal
+
+# Editores y SO
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
