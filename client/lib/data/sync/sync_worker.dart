@@ -36,13 +36,15 @@ class SyncWorker extends ChangeNotifier {
   bool get isOnline => _isOnline;
   int get pendingCount => _pendingCount;
 
-  /// Inicializa el ciclo de vida del despachador
+/// Inicializa el ciclo de vida del despachador
   void start() {
     _pollingTimer?.cancel();
     _pollingTimer = Timer.periodic(interval, (_) => processPendingQueue());
-    // Ejecución inicial reactiva diferida
     Future.microtask(() => processPendingQueue());
   }
+
+  /// Alias explícito para inicializar el temporizador en main.dart
+  void startPeriodicWorker() => start();
 
   /// Detiene el worker limpiamente (evita fugas en tests o shutdown)
   void stop() {
@@ -113,7 +115,7 @@ class SyncWorker extends ChangeNotifier {
   /// Consulta optimizada con índice idx_sync_queue_status_created[cite: 3]
   Future<List<SyncEvent>> _fetchPendingBatch() async {
     final db = await _dbHelper.database;
-    final nowIso = DateTime.now().toUtc().toIso8601String();
+    //final nowIso = DateTime.now().toUtc().toIso8601String();
 
     // Filtra pendientes cuyo backoff programado ya haya vencido
     // Para simplificar sin alterar el schema DDL[cite: 3], usamos retry_count dentro de la cláusula

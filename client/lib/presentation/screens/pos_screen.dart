@@ -1,29 +1,59 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../data/local/models.dart';
-import '../controllers/cart_controller.dart';
-import '../widgets/checkout_dialog.dart';
-import 'dart:async';
-import '../widgets/sync_status_badge.dart';
-import '../../data/sync/sync_worker.dart';
 
-// Definición de Intenciones para Atajos de Teclado
+// Modelos y Repositorios Locales
+import '../../data/local/models.dart';
+import '../../data/sync/sync_worker.dart';
+import '../../data/inventory/inventory_api_client.dart';
+
+// Controladores
+import '../controllers/cart_controller.dart';
+import '../controllers/alerts_controller.dart';
+import '../controllers/shift_controller.dart';
+
+// Pantallas y Widgets
+import 'inventory_screen.dart';
+import '../widgets/checkout_dialog.dart';
+import '../widgets/sync_status_badge.dart';
+import '../widgets/stock_alerts_button.dart';
+import '../widgets/shift_cut_dialog.dart';
+import '../widgets/open_shift_dialog.dart';
+
+import '../../data/hardware/printer_service.dart';
+import '../../data/hardware/esc_pos_ticket_builder.dart';
+
+// ---------------------------------------------------------------------------
+// DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
+// ---------------------------------------------------------------------------
 class FocusSearchIntent extends Intent { const FocusSearchIntent(); }
 class CheckoutIntent extends Intent { const CheckoutIntent(); }
 class HoldSaleIntent extends Intent { const HoldSaleIntent(); }
 class ViewHeldSalesIntent extends Intent { const ViewHeldSalesIntent(); }
 class ClearCartIntent extends Intent { const ClearCartIntent(); }
+class OpenInventoryIntent extends Intent { const OpenInventoryIntent(); }
+class ShiftCutIntent extends Intent { const ShiftCutIntent(); }
 
 class PosScreen extends StatefulWidget {
   final CartController cartController;
-  final String corteCajaId;
   final SyncWorker syncWorker;
+  final AlertsController alertsController;
+  final ShiftController shiftController;
+  final PrinterService printerService;
+  final InventoryApiClient inventoryApiClient;
+  final String usuarioId;
+  final String nombreNegocio; 
 
   const PosScreen({
     super.key,
     required this.cartController,
-    required this.syncWorker, 
-    this.corteCajaId = 'corte-demo-001',
+    required this.syncWorker,
+    required this.alertsController,
+    required this.shiftController,
+    required this.inventoryApiClient,
+    required this.printerService,
+    this.usuarioId = 'cajero-principal',
+    this.nombreNegocio = 'MI TIENDA POS',
   });
 
   @override
@@ -39,6 +69,16 @@ class _PosScreenState extends State<PosScreen> {
   void initState() {
     super.initState();
     _refocusSearch();
+    widget.alertsController.loadAlerts(silent: true);
+
+    // Si no hay turno activo, se exige apertura inmediata al montar el frame
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await widget.shiftController.checkActiveShift();
+      if (!widget.shiftController.hasActiveShift && mounted) {
+        await OpenShiftDialog.show(context, widget.shiftController);
+        _refocusSearch();
+      }
+    });
   }
 
   @override
@@ -109,23 +149,82 @@ class _PosScreenState extends State<PosScreen> {
     ).then((_) => _refocusSearch());
   }
 
-  void _triggerCheckout() {
+  void _openShiftCutModal() {
+    ShiftCutDialog.show(context, widget.shiftController);
+  }
+
+  void _openInventoryView() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => InventoryScreen(
+          apiClient: widget.inventoryApiClient,
+        ),
+      ),
+    ).then((_) => _refocusSearch());
+  }
+
+void _triggerCheckout() async {
     if (widget.cartController.isEmpty) return;
 
+    // 1. Validación de turno de caja abierto
+    if (!widget.shiftController.hasActiveShift) {
+      final opened = await OpenShiftDialog.show(context, widget.shiftController);
+      if (!opened) return;
+    }
+
+    if (!mounted) return;
+
+    // 2. Snapshot inmutable de las partidas actuales previo al vaciado del carrito
+    final currentItemsSnapshot = List<SaleDetailItem>.from(widget.cartController.items);
+    final currentSubtotal = widget.cartController.subtotal;
+    final currentDescuento = widget.cartController.descuentoTotal;
+    final currentTotal = widget.cartController.total;
+    final activeShiftId = widget.shiftController.activeShiftId;
+
+    // 3. Despliegue del diálogo de cobro mixto
     showDialog<double>(
       context: context,
       barrierDismissible: false,
       builder: (_) => CheckoutDialog(
         cartController: widget.cartController,
-        corteCajaId: widget.corteCajaId,
+        corteCajaId: activeShiftId,
       ),
     ).then((cambio) {
       if (cambio != null && mounted) {
+        // Notificación en pantalla al operador
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Cobro Exitoso. Cambio: \$${cambio.toStringAsFixed(2)}'),
             backgroundColor: const Color(0xFF2E7D32),
             duration: const Duration(seconds: 3),
+          ),
+        );
+
+        // 4. DISPARO ASÍNCRONO NO BLOQUEANTE DEL TICKET FÍSICO
+        final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+        
+        final ticketData = TicketPrintData(
+          negocioNombre: widget.nombreNegocio,
+          folio: folioTicket,
+          fecha: DateTime.now(),
+          cajero: widget.usuarioId,
+          turnoId: activeShiftId,
+          items: currentItemsSnapshot,
+          subtotal: currentSubtotal,
+          descuentoTotal: currentDescuento,
+          total: currentTotal,
+          pagos: [
+            // Respaldo de método principal si el diálogo ya consumió el desglose
+            PaymentMethodBreakdown(metodo: 'Liquidado', monto: currentTotal),
+          ],
+          cambio: cambio,
+        );
+
+        // Se ejecuta en segundo plano: no usa 'await' para no retrasar el siguiente escaneo
+        unawaited(
+          widget.printerService.printSaleTicketAsync(
+            ticketData,
+            openCashDrawer: true, // Envía pulso para abrir cajón si hubo cobro
           ),
         );
       }
@@ -154,7 +253,7 @@ class _PosScreenState extends State<PosScreen> {
             itemCount: held.length,
             itemBuilder: (c, idx) {
               final sale = held[idx];
-              final total = sale.items.fold<double>(0.0, (acc, it) => acc + (it.totalLinea ?? 0.0));
+              final total = sale.items.fold<double>(0.0, (acc, it) => acc + it.totalLinea);
               return ListTile(
                 dense: true,
                 leading: const Icon(Icons.pause_circle_outline, color: Color(0xFF1F4E79)),
@@ -179,6 +278,8 @@ class _PosScreenState extends State<PosScreen> {
     return Shortcuts(
       shortcuts: <ShortcutActivator, Intent>{
         const SingleActivator(LogicalKeyboardKey.f1): const FocusSearchIntent(),
+        const SingleActivator(LogicalKeyboardKey.f3): const OpenInventoryIntent(),
+        const SingleActivator(LogicalKeyboardKey.f4): const ShiftCutIntent(),
         const SingleActivator(LogicalKeyboardKey.f6): const HoldSaleIntent(),
         const SingleActivator(LogicalKeyboardKey.f7): const ViewHeldSalesIntent(),
         const SingleActivator(LogicalKeyboardKey.f12): const CheckoutIntent(),
@@ -186,7 +287,18 @@ class _PosScreenState extends State<PosScreen> {
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          FocusSearchIntent: CallbackAction<FocusSearchIntent>(onInvoke: (_) => _refocusSearch()),
+          FocusSearchIntent: CallbackAction<FocusSearchIntent>(onInvoke: (_) {
+            _refocusSearch();
+            return null;
+          }),
+          OpenInventoryIntent: CallbackAction<OpenInventoryIntent>(onInvoke: (_) {
+            _openInventoryView();
+            return null;
+          }),
+          ShiftCutIntent: CallbackAction<ShiftCutIntent>(onInvoke: (_) {
+            _openShiftCutModal();
+            return null;
+          }),
           HoldSaleIntent: CallbackAction<HoldSaleIntent>(onInvoke: (_) {
             widget.cartController.holdCurrentSale();
             _refocusSearch();
@@ -242,6 +354,7 @@ class _PosScreenState extends State<PosScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
       child: Row(
         children: [
+          // 1. Campo de texto para escáner / buscador manual
           Expanded(
             child: TextField(
               controller: _searchController,
@@ -250,7 +363,7 @@ class _PosScreenState extends State<PosScreen> {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
                 isDense: true,
-                hintText: 'Escanea código de barras o escribe descripción y presiona [ENTER]...',
+                hintText: 'Escanea código de barras o busca producto [F1]...',
                 prefixIcon: Icon(Icons.qr_code_scanner, color: Color(0xFF1F4E79)),
                 border: OutlineInputBorder(),
                 filled: true,
@@ -259,7 +372,28 @@ class _PosScreenState extends State<PosScreen> {
               onSubmitted: _handleBarcodeScan,
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
+
+          // 2. Acceso a Catálogo e Inventario Dinámico (F3)
+          IconButton(
+            icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF1F4E79)),
+            tooltip: 'Inventario Dinámico [F3]',
+            onPressed: _openInventoryView,
+          ),
+
+          // 3. Acceso a Cortes de Caja X y Z (F4)
+          IconButton(
+            icon: const Icon(Icons.point_of_sale, color: Color(0xFF1F4E79)),
+            tooltip: 'Corte de Caja [F4]',
+            onPressed: _openShiftCutModal,
+          ),
+          const SizedBox(width: 4),
+
+          // 4. Badge reactivo de Alertas de Escasez BI
+          StockAlertsButton(alertsController: widget.alertsController),
+          const SizedBox(width: 8),
+
+          // 5. Indicador reactivo de conectividad y cola Outbox
           SyncStatusBadge(syncWorker: widget.syncWorker),
         ],
       ),
@@ -477,11 +611,13 @@ class _PosScreenState extends State<PosScreen> {
         alignment: WrapAlignment.center,
         children: [
           _buildKeyBadge('F1', 'Buscador', () => _refocusSearch()),
+          _buildKeyBadge('F3', 'Inventario', _openInventoryView),
+          _buildKeyBadge('F4', 'Corte Caja', _openShiftCutModal),
           _buildKeyBadge('F6', 'Pausar Ticket', () {
             widget.cartController.holdCurrentSale();
             _refocusSearch();
           }),
-          _buildKeyBadge('F7', 'Ver Pausados (${widget.cartController.heldSales.length})', _showHeldSalesModal),
+          _buildKeyBadge('F7', 'Pausados (${widget.cartController.heldSales.length})', _showHeldSalesModal),
           _buildKeyBadge('Alt+Supr', 'Limpiar', () {
             widget.cartController.clearCart();
             _refocusSearch();

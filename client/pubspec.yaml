@@ -13,6 +13,7 @@ dependencies:
   sqflite: ^2.3.0
   path: ^1.8.3
   http: ^1.6.0
+  sqflite_common_ffi_web: ^1.2.0
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +22,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+      - lib/data/local/schema.sql
