@@ -22,6 +22,8 @@ import 'presentation/controllers/shift_controller.dart';
 
 // Pantalla Principal de Cobro
 import 'presentation/screens/pos_screen.dart';
+import 'data/repositories/user_repository.dart';
+import 'presentation/controllers/auth_controller.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +63,8 @@ void main() async {
   final cartController = CartController(salesRepository: salesRepo);
   final alertsController = AlertsController(apiClient: inventoryApiClient);
   final shiftController = ShiftController(shiftRepository: shiftRepo);
+  final userRepo = UserRepository(dbHelper: dbHelper);
+  final authController = AuthController(userRepository: userRepo);
 
   runApp(PosApp(
     cartController: cartController,
@@ -69,6 +73,7 @@ void main() async {
     shiftController: shiftController,
     inventoryApiClient: inventoryApiClient,
     printerService: printerService,
+    authController: authController,
   ));
 }
 
@@ -79,6 +84,7 @@ class PosApp extends StatelessWidget {
   final ShiftController shiftController;
   final InventoryApiClient inventoryApiClient;
   final PrinterService printerService;
+  final AuthController authController;
 
   const PosApp({
     super.key,
@@ -88,6 +94,7 @@ class PosApp extends StatelessWidget {
     required this.shiftController,
     required this.inventoryApiClient,
     required this.printerService,
+    required this.authController,
   });
 
   @override
@@ -107,6 +114,7 @@ class PosApp extends StatelessWidget {
         shiftController: shiftController,
         inventoryApiClient: inventoryApiClient,
         printerService: printerService,
+        authController: authController,
         usuarioId: 'cajero-principal',
         nombreNegocio: 'MI TIENDA POS',
       ),

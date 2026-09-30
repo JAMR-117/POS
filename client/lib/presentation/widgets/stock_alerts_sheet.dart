@@ -66,10 +66,10 @@ class StockAlertsSheet extends StatelessWidget {
                 }
 
                 if (alertsController.alerts.isEmpty) {
-                  return Center(
+                  return const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
+                      children: [
                         Icon(Icons.check_circle_outline, size: 64, color: Color(0xFF2E7D32)),
                         SizedBox(height: 12),
                         Text(
@@ -165,7 +165,7 @@ class StockAlertsSheet extends StatelessWidget {
 
     return ListTile(
       leading: CircleAvatar(
-        backgroundColor: badgeColor.withOpacity(0.12),
+        backgroundColor: badgeColor.withValues(alpha: 0.12),
         child: Icon(
           item.nivelRiesgo == RiskLevel.critico ? Icons.error_outline : Icons.warning_amber_rounded,
           color: badgeColor,

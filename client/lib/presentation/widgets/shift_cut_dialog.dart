@@ -254,7 +254,7 @@ class _ShiftCutDialogState extends State<ShiftCutDialog> with SingleTickerProvid
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: badgeColor.withOpacity(0.12),
+            color: badgeColor.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(4),
             border: Border.all(color: badgeColor),
           ),

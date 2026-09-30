@@ -108,11 +108,11 @@ class EscPosTicketBuilder {
     // 4. Cabecera de Partidas
     if (paperSize == PaperSize.mm80) {
       _buffer.add(_boldOn);
-      _writeText(_formatTwoColumns('CANT  DESCRIPCIÓN', 'TOTAL', paperSize.maxChars) + '\n');
+      _writeText('${_formatTwoColumns('CANT  DESCRIPCIÓN', 'TOTAL', paperSize.maxChars)}\n');
       _buffer.add(_boldOff);
     } else {
       _buffer.add(_boldOn);
-      _writeText(_formatTwoColumns('CANT DESCRIPCIÓN', 'IMPORTE', paperSize.maxChars) + '\n');
+      _writeText('${_formatTwoColumns('CANT DESCRIPCIÓN', 'IMPORTE', paperSize.maxChars)}\n');
       _buffer.add(_boldOff);
     }
 
@@ -126,14 +126,14 @@ class EscPosTicketBuilder {
       final String lineTotal = '\$${item.totalLinea.toStringAsFixed(2)}';
 
       if (lineLeft.length + lineTotal.length + 1 <= paperSize.maxChars) {
-        _writeText(_formatTwoColumns(lineLeft, lineTotal, paperSize.maxChars) + '\n');
+        _writeText('${_formatTwoColumns(lineLeft, lineTotal, paperSize.maxChars)}\n');
       } else {
         _writeText('$qtyStr x ${item.descripcion}\n');
-        _writeText(_formatTwoColumns('  P.U. \$${item.precioHistorico.toStringAsFixed(2)}', lineTotal, paperSize.maxChars) + '\n');
+        _writeText('${_formatTwoColumns('  P.U. \$${item.precioHistorico.toStringAsFixed(2)}', lineTotal, paperSize.maxChars)}\n');
       }
 
       if (item.descuentoLinea > 0) {
-        _writeText(_formatTwoColumns('  (Desc.)', '-\$${item.descuentoLinea.toStringAsFixed(2)}', paperSize.maxChars) + '\n');
+        _writeText('${_formatTwoColumns('  (Desc.)', '-\$${item.descuentoLinea.toStringAsFixed(2)}', paperSize.maxChars)}\n');
       }
     }
 
@@ -141,15 +141,15 @@ class EscPosTicketBuilder {
 
     // 6. Totales y Liquidación
     _buffer.add(_alignRight);
-    _writeText(_formatTwoColumns('SUBTOTAL:', '\$${data.subtotal.toStringAsFixed(2)}', paperSize.maxChars) + '\n');
+    _writeText('${_formatTwoColumns('SUBTOTAL:', '\$${data.subtotal.toStringAsFixed(2)}', paperSize.maxChars)}\n');
 
     if (data.descuentoTotal > 0) {
-      _writeText(_formatTwoColumns('DESCUENTO:', '-\$${data.descuentoTotal.toStringAsFixed(2)}', paperSize.maxChars) + '\n');
+      _writeText('${_formatTwoColumns('DESCUENTO:', '-\$${data.descuentoTotal.toStringAsFixed(2)}', paperSize.maxChars)}\n');
     }
 
     _buffer.add(_boldOn);
     _buffer.add(_doubleSize);
-    _writeText(_formatTwoColumns('TOTAL:', '\$${data.total.toStringAsFixed(2)}', paperSize.maxChars ~/ (paperSize == PaperSize.mm80 ? 2 : 2)) + '\n');
+    _writeText('${_formatTwoColumns('TOTAL:', '\$${data.total.toStringAsFixed(2)}', paperSize.maxChars ~/ (paperSize == PaperSize.mm80 ? 2 : 2))}\n');
     _buffer.add(_normalSize);
     _buffer.add(_boldOff);
 
@@ -159,10 +159,10 @@ class EscPosTicketBuilder {
     _buffer.add(_alignLeft);
     for (final p in data.pagos) {
       final label = 'PAGO (${p.metodo.toUpperCase()}):';
-      _writeText(_formatTwoColumns(label, '\$${p.monto.toStringAsFixed(2)}', paperSize.maxChars) + '\n');
+      _writeText('${_formatTwoColumns(label, '\$${p.monto.toStringAsFixed(2)}', paperSize.maxChars)}\n');
     }
     _buffer.add(_boldOn);
-    _writeText(_formatTwoColumns('CAMBIO ENTREGADO:', '\$${data.cambio.toStringAsFixed(2)}', paperSize.maxChars) + '\n');
+    _writeText('${_formatTwoColumns('CAMBIO ENTREGADO:', '\$${data.cambio.toStringAsFixed(2)}', paperSize.maxChars)}\n');
     _buffer.add(_boldOff);
 
     _writeDivider('=');

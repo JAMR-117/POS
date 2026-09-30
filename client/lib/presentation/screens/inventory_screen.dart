@@ -1,6 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+
 import '../../data/inventory/inventory_api_client.dart';
+import '../../data/local/models.dart';
+import '../controllers/auth_controller.dart';
+import '../widgets/stock_adjustment_dialog.dart';
+import '../widgets/catalog_import_dialog.dart';
 
 enum VelocityTier {
   alta,
@@ -16,11 +21,13 @@ enum VelocityTier {
 
 class InventoryScreen extends StatefulWidget {
   final InventoryApiClient apiClient;
+  final AuthController authController; // <-- Agregado para el RBAC de Ajustes
   final String? tiendaId;
 
   const InventoryScreen({
     super.key,
     required this.apiClient,
+    required this.authController,
     this.tiendaId,
   });
 
@@ -97,7 +104,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
         tiendaId: widget.tiendaId,
       );
 
-      if (!mounted) return; // <- Protege contra desmontaje
+      if (!mounted) return;
 
       setState(() {
         if (reset) {
@@ -111,12 +118,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
         }
       });
     } catch (e) {
-      if (!mounted) return; // <- Protege contra desmontaje
+      if (!mounted) return;
       setState(() {
         _errorMessage = e.toString();
       });
     } finally {
-      if (mounted) { // <- Solo actualiza estado si la pantalla sigue abierta
+      if (mounted) {
         setState(() {
           _isLoading = false;
           _isLoadingMore = false;
@@ -128,7 +135,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   void _onSearchChanged(String value) {
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 250), () {
-      setState(() {});
+      if (mounted) setState(() {});
     });
   }
 
@@ -141,6 +148,23 @@ class _InventoryScreenState extends State<InventoryScreen> {
       final barcode = (item.codigoBarras ?? '').toLowerCase();
       return desc.contains(query) || sku.contains(query) || barcode.contains(query);
     }).toList();
+  }
+
+  /// Adaptador rápido para transformar un elemento del catálogo BI 
+  /// en un modelo Product base para el modal de Ajuste Físico.
+  Product _mapToProductModel(VelocityCatalogItem item) {
+    return Product(
+      id: item.id,
+      codigoBarras: item.codigoBarras,
+      sku: item.sku,
+      descripcion: item.descripcion,
+      departamento: item.departamento,
+      stockActual: item.stockActual,
+      precioCompra: 0.0, // No requerido para ajustar stock
+      precioVenta: 0.0,  // No requerido para ajustar stock
+      porcentajeImpuesto: 0.0,
+      esAGranel: item.stockActual % 1 != 0, // Deducción lógica de decimales
+    );
   }
 
   @override
@@ -163,6 +187,14 @@ class _InventoryScreenState extends State<InventoryScreen> {
             tooltip: 'Recargar catálogo',
             onPressed: () => _fetchCatalog(reset: true),
           ),
+          IconButton(
+          icon: const Icon(Icons.file_upload_outlined),
+          tooltip: 'Importar Catálogo Masivo (CSV)',
+          onPressed: () {
+            CatalogImportDialog.show(context);
+            // Tras cerrarse el modal, puedes invocar tu método _fetchCatalog() o _loadCatalog() para refrescar la grilla.
+          },
+        ),
           const SizedBox(width: 8),
         ],
       ),
@@ -304,6 +336,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
           SizedBox(width: 90, child: Text('30D VENTAS', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
           SizedBox(width: 90, child: Text('SALIDA/DÍA', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
           SizedBox(width: 90, child: Text('RUNWAY', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+          SizedBox(width: 50, child: Text('AJUSTE', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
         ],
       ),
     );
@@ -409,6 +442,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 fontWeight: FontWeight.bold,
                 color: item.diasRestantes <= 7.0 && item.stockActual > 0 ? const Color(0xFFE65100) : Colors.black87,
               ),
+            ),
+          ),
+          SizedBox(
+            width: 50,
+            child: IconButton(
+              icon: const Icon(Icons.balance, color: Color(0xFFF57C00), size: 20),
+              tooltip: 'Ajuste Físico de Inventario',
+              onPressed: () async {
+                final prodModel = _mapToProductModel(item);
+                final bool adjusted = await StockAdjustmentDialog.show(
+                  context, 
+                  prodModel, 
+                  widget.authController,
+                );
+                
+                if (adjusted && mounted) {
+                  _fetchCatalog(reset: true); // Recarga automática post-ajuste
+                }
+              },
             ),
           ),
         ],

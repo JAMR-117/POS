@@ -2,7 +2,6 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/sales_repository.dart';
-import 'dart:async';
 
 /// Representa una venta aparcada / en espera
 class HeldSale {

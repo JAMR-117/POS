@@ -1,8 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import '../local/database_helper.dart';
 import '../local/models.dart';
-import 'dart:async';
 
 class InsufficientStockException implements Exception {
   final String productoId;
@@ -14,6 +14,36 @@ class InsufficientStockException implements Exception {
   String toString() => 'Stock insuficiente para $productoId: Disp: $disponible, Req: $solicitado';
 }
 
+/// Modelo de datos para el historial de ventas
+class SaleRecord {
+  final String id;
+  final String folioTicket;
+  final double total;
+  final DateTime fechaVenta;
+  final String estatus;
+  final List<dynamic> pagosDesglose;
+
+  SaleRecord({
+    required this.id,
+    required this.folioTicket,
+    required this.total,
+    required this.fechaVenta,
+    required this.estatus,
+    required this.pagosDesglose,
+  });
+
+  factory SaleRecord.fromMap(Map<String, dynamic> map) {
+    return SaleRecord(
+      id: map['id'] as String,
+      folioTicket: map['folio_ticket'] as String? ?? 'S/F',
+      total: (map['total'] as num).toDouble(),
+      fechaVenta: DateTime.parse(map['fecha_venta'] as String),
+      estatus: map['estatus'] as String? ?? 'completado',
+      pagosDesglose: jsonDecode(map['pagos_desglose'] as String? ?? '[]'),
+    );
+  }
+}
+
 class SalesRepository {
   final DatabaseHelper _dbHelper;
 
@@ -23,8 +53,7 @@ class SalesRepository {
   // ===========================================================================
   // 1. TRANSACCIÓN ATÓMICA DE VENTA (ACID + OUTBOX PATTERN)
   // ===========================================================================
-  /// Registra la venta, partidas, descuenta inventario (decimal) y emite el evento Outbox.
-  /// En caso de error, la transacción revierte automáticamente todos los cambios.
+  
   Future<void> processSaleTransaction(SaleTransactionRequest sale) async {
     final db = await _dbHelper.database;
 
@@ -44,21 +73,19 @@ class SalesRepository {
           'total': sale.total,
           'pagos_desglose': jsonEncode(sale.pagosDesglose.map((p) => p.toJson()).toList()),
           'fecha_venta': isoNow,
+          'estatus': 'completado' // Campo agregado para CAJ-07
         },
         conflictAlgorithm: ConflictAlgorithm.abort,
       );
 
       // 2. Inserción de cada Partida y Reducción de Stock Decimal
       for (final item in sale.items) {
-        // Inserción en detalles_venta
         await txn.insert(
           'detalles_venta',
           item.toMap(sale.ventaId),
           conflictAlgorithm: ConflictAlgorithm.abort,
         );
 
-        // Verificación y Descuento del Stock (Soporta granel)
-        // Se ejecuta una actualización directa con decremento relativo
         final updatedRows = await txn.rawUpdate('''
           UPDATE productos 
           SET stock_actual = stock_actual - ?, 
@@ -87,11 +114,11 @@ class SalesRepository {
         'timestamp': isoNow,
       });
 
-      // 4. Inserción en 'sync_queue' con estado 'pending'
+      // 4. Inserción en 'sync_queue'
       await txn.insert(
         'sync_queue',
         {
-          'id': sale.ventaId, // Mismo ID de venta para asegurar idempotencia en backend
+          'id': sale.ventaId, 
           'event_type': 'VENTA_REGISTRADA',
           'payload': outboxPayload,
           'sync_status': 'pending',
@@ -109,7 +136,6 @@ class SalesRepository {
   // 2. CONSULTAS RÁPIDAS DE CAJA (LATENCIA CERO)
   // ===========================================================================
 
-  /// Búsqueda exacta indexada por Código de Barras o SKU (Ideal para pistola lectora)
   Future<Product?> findProductByBarcodeOrSku(String code) async {
     final db = await _dbHelper.database;
     final cleanCode = code.trim();
@@ -127,8 +153,6 @@ class SalesRepository {
     return null;
   }
 
-  /// Búsqueda predictiva e incremental por descripción para autocompletado en UI
-  /// Limitada a 15 resultados para no saturar memoria ni render en hardware modesto.
   Future<List<Product>> searchProductsByDescription(String query, {int limit = 15}) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return [];
@@ -144,5 +168,104 @@ class SalesRepository {
     );
 
     return results.map((row) => Product.fromMap(row)).toList();
+  }
+
+  // ===========================================================================
+  // 3. HISTORIAL Y DEVOLUCIONES (CAJ-07)
+  // ===========================================================================
+
+  Future<List<SaleRecord>> getSalesHistory({String query = '', int limit = 50}) async {
+    final db = await _dbHelper.database;
+    final cleanQuery = query.trim();
+    
+    String whereClause = '';
+    List<dynamic> whereArgs = [];
+
+    if (cleanQuery.isNotEmpty) {
+      whereClause = 'folio_ticket LIKE ? OR id = ?';
+      whereArgs = ['%$cleanQuery%', cleanQuery];
+    }
+
+    final results = await db.query(
+      'ventas',
+      where: whereClause.isEmpty ? null : whereClause,
+      whereArgs: whereClause.isEmpty ? null : whereArgs,
+      orderBy: 'fecha_venta DESC',
+      limit: limit,
+    );
+
+    return results.map((r) => SaleRecord.fromMap(r)).toList();
+  }
+
+  Future<List<SaleDetailItem>> getSaleDetails(String ventaId) async {
+    final db = await _dbHelper.database;
+    final results = await db.query(
+      'detalles_venta',
+      where: 'venta_id = ?',
+      whereArgs: [ventaId],
+    );
+
+    return results.map((map) => SaleDetailItem(
+      id: map['id'] as String,
+      productoId: map['producto_id'] as String,
+      descripcion: 'Producto ID: ${map['producto_id']}',
+      cantidad: (map['cantidad'] as num).toDouble(),
+      precioHistorico: (map['precio_historico'] as num).toDouble(),
+      totalLinea: (map['total_linea'] as num).toDouble(),
+      costoHistorico: (map['costo_historico'] as num?)?.toDouble() ?? 0.0,
+      descuentoLinea: (map['descuento_linea'] as num?)?.toDouble() ?? 0.0,
+    )).toList();
+  }
+
+  Future<void> cancelSale(String ventaId) async {
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      // 1. Verificar estado actual de la venta
+      final ventaRows = await txn.query('ventas', where: 'id = ?', whereArgs: [ventaId], limit: 1);
+      if (ventaRows.isEmpty) throw Exception('Venta no encontrada');
+      if (ventaRows.first['estatus'] == 'cancelado') throw Exception('El ticket ya está cancelado');
+
+      // 2. Marcar como cancelado
+      await txn.update(
+        'ventas',
+        {'estatus': 'cancelado'},
+        where: 'id = ?',
+        whereArgs: [ventaId],
+      );
+
+      // 3. Recuperar partidas para reintegrar stock
+      final detalles = await txn.query('detalles_venta', where: 'venta_id = ?', whereArgs: [ventaId]);
+      
+      for (final item in detalles) {
+        final prodId = item['producto_id'] as String;
+        final qty = (item['cantidad'] as num).toDouble();
+
+        await txn.rawUpdate(
+          'UPDATE productos SET stock_actual = stock_actual + ?, updated_at = ? WHERE id = ?',
+          [qty, isoNow, prodId]
+        );
+      }
+
+      // 4. Inserción en sync_queue
+      final outboxPayload = jsonEncode({
+        'venta_id': ventaId,
+        'fecha_cancelacion': isoNow,
+        'motivo': 'Cancelación desde caja',
+      });
+
+      await txn.insert(
+        'sync_queue',
+        {
+          'id': 'CANC_$ventaId',
+          'event_type': 'VENTA_CANCELADA',
+          'payload': outboxPayload,
+          'sync_status': 'pending',
+          'created_at': isoNow,
+        },
+        conflictAlgorithm: ConflictAlgorithm.abort,
+      );
+    });
   }
 }

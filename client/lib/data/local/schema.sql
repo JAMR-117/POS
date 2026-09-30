@@ -107,3 +107,48 @@ CREATE INDEX IF NOT EXISTS idx_sync_queue_status_created ON sync_queue(sync_stat
 -- Consultas transaccionales y de corte por sesión
 CREATE INDEX IF NOT EXISTS idx_ventas_corte_id ON ventas(corte_caja_id);
 CREATE INDEX IF NOT EXISTS idx_detalles_venta_venta_id ON detalles_venta(venta_id);
+
+-- ----------------------------------------------------------------------------
+-- 7. TABLA DE USUARIOS (RBAC OFFLINE)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS usuarios (
+    id TEXT PRIMARY KEY NOT NULL,
+    nombre TEXT NOT NULL,
+    pin_acceso TEXT NOT NULL UNIQUE,
+    rol TEXT NOT NULL CHECK (rol IN ('admin', 'cajero')),
+    activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
+);
+
+-- Usuario administrador por defecto para el primer inicio (PIN: 1234)
+INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
+VALUES ('admin-001', 'Administrador Principal', '1234', 'admin', 1);
+
+-- Usuario cajero de prueba (PIN: 5678)
+INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
+VALUES ('cajero-001', 'Caja 1', '5678', 'cajero', 1);
+
+-- ----------------------------------------------------------------------------
+-- 8. TABLA DE CLIENTES Y CUENTAS POR COBRAR
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS clientes (
+    id TEXT PRIMARY KEY NOT NULL,
+    nombre TEXT NOT NULL,
+    rfc_o_dni TEXT,
+    telefono TEXT,
+    limite_credito REAL NOT NULL DEFAULT 0.0,
+    saldo_deudor REAL NOT NULL DEFAULT 0.0,
+    activo INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS abonos_credito (
+    id TEXT PRIMARY KEY NOT NULL,
+    cliente_id TEXT NOT NULL,
+    monto REAL NOT NULL,
+    fecha TEXT NOT NULL,
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);
+
+
+ALTER TABLE ventas ADD COLUMN estatus TEXT NOT NULL DEFAULT 'completado' CHECK (estatus IN ('completado', 'cancelado'));

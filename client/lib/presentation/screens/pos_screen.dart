@@ -6,22 +6,23 @@ import 'package:flutter/services.dart';
 import '../../data/local/models.dart';
 import '../../data/sync/sync_worker.dart';
 import '../../data/inventory/inventory_api_client.dart';
+import '../../data/hardware/printer_service.dart';
+import '../../data/hardware/esc_pos_ticket_builder.dart';
 
 // Controladores
 import '../controllers/cart_controller.dart';
 import '../controllers/alerts_controller.dart';
 import '../controllers/shift_controller.dart';
+import '../controllers/auth_controller.dart';
 
 // Pantallas y Widgets
 import 'inventory_screen.dart';
+import 'login_screen.dart';
 import '../widgets/checkout_dialog.dart';
 import '../widgets/sync_status_badge.dart';
 import '../widgets/stock_alerts_button.dart';
 import '../widgets/shift_cut_dialog.dart';
 import '../widgets/open_shift_dialog.dart';
-
-import '../../data/hardware/printer_service.dart';
-import '../../data/hardware/esc_pos_ticket_builder.dart';
 
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
@@ -39,10 +40,11 @@ class PosScreen extends StatefulWidget {
   final SyncWorker syncWorker;
   final AlertsController alertsController;
   final ShiftController shiftController;
-  final PrinterService printerService;
   final InventoryApiClient inventoryApiClient;
+  final PrinterService printerService;
+  final AuthController authController;
   final String usuarioId;
-  final String nombreNegocio; 
+  final String nombreNegocio;
 
   const PosScreen({
     super.key,
@@ -52,6 +54,7 @@ class PosScreen extends StatefulWidget {
     required this.shiftController,
     required this.inventoryApiClient,
     required this.printerService,
+    required this.authController,
     this.usuarioId = 'cajero-principal',
     this.nombreNegocio = 'MI TIENDA POS',
   });
@@ -71,7 +74,7 @@ class _PosScreenState extends State<PosScreen> {
     _refocusSearch();
     widget.alertsController.loadAlerts(silent: true);
 
-    // Si no hay turno activo, se exige apertura inmediata al montar el frame
+    // Verificamos si hay un turno activo al montar la pantalla
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await widget.shiftController.checkActiveShift();
       if (!widget.shiftController.hasActiveShift && mounted) {
@@ -154,19 +157,30 @@ class _PosScreenState extends State<PosScreen> {
   }
 
   void _openInventoryView() {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => InventoryScreen(
-          apiClient: widget.inventoryApiClient,
+    if (widget.authController.isAdmin) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => InventoryScreen(
+            apiClient: widget.inventoryApiClient,
+            authController: widget.authController,
+            ),
         ),
-      ),
-    ).then((_) => _refocusSearch());
+      ).then((_) => _refocusSearch());
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Acceso denegado: Se requiere rol de Administrador para abrir el Catálogo.'),
+          backgroundColor: Color(0xFFD32F2F),
+        ),
+      );
+      _refocusSearch();
+    }
   }
 
-void _triggerCheckout() async {
+  void _triggerCheckout() async {
     if (widget.cartController.isEmpty) return;
 
-    // 1. Validación de turno de caja abierto
+    // Validación de turno de caja abierto
     if (!widget.shiftController.hasActiveShift) {
       final opened = await OpenShiftDialog.show(context, widget.shiftController);
       if (!opened) return;
@@ -174,14 +188,13 @@ void _triggerCheckout() async {
 
     if (!mounted) return;
 
-    // 2. Snapshot inmutable de las partidas actuales previo al vaciado del carrito
+    // Snapshot inmutable de las partidas actuales previo al vaciado del carrito
     final currentItemsSnapshot = List<SaleDetailItem>.from(widget.cartController.items);
     final currentSubtotal = widget.cartController.subtotal;
     final currentDescuento = widget.cartController.descuentoTotal;
     final currentTotal = widget.cartController.total;
     final activeShiftId = widget.shiftController.activeShiftId;
 
-    // 3. Despliegue del diálogo de cobro mixto
     showDialog<double>(
       context: context,
       barrierDismissible: false,
@@ -191,7 +204,6 @@ void _triggerCheckout() async {
       ),
     ).then((cambio) {
       if (cambio != null && mounted) {
-        // Notificación en pantalla al operador
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Cobro Exitoso. Cambio: \$${cambio.toStringAsFixed(2)}'),
@@ -200,31 +212,29 @@ void _triggerCheckout() async {
           ),
         );
 
-        // 4. DISPARO ASÍNCRONO NO BLOQUEANTE DEL TICKET FÍSICO
+        // Disparo asíncrono del ticket a la impresora
         final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
         
         final ticketData = TicketPrintData(
           negocioNombre: widget.nombreNegocio,
           folio: folioTicket,
           fecha: DateTime.now(),
-          cajero: widget.usuarioId,
+          cajero: widget.authController.currentUser?.nombre ?? widget.usuarioId,
           turnoId: activeShiftId,
           items: currentItemsSnapshot,
           subtotal: currentSubtotal,
           descuentoTotal: currentDescuento,
           total: currentTotal,
           pagos: [
-            // Respaldo de método principal si el diálogo ya consumió el desglose
             PaymentMethodBreakdown(metodo: 'Liquidado', monto: currentTotal),
           ],
           cambio: cambio,
         );
 
-        // Se ejecuta en segundo plano: no usa 'await' para no retrasar el siguiente escaneo
         unawaited(
           widget.printerService.printSaleTicketAsync(
             ticketData,
-            openCashDrawer: true, // Envía pulso para abrir cajón si hubo cobro
+            openCashDrawer: true, 
           ),
         );
       }
@@ -273,17 +283,29 @@ void _triggerCheckout() async {
     ).then((_) => _refocusSearch());
   }
 
+  void _handleLogout() {
+    widget.authController.logout();
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => LoginScreen(
+          authController: widget.authController,
+          posAppTarget: widget, 
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
-      shortcuts: <ShortcutActivator, Intent>{
-        const SingleActivator(LogicalKeyboardKey.f1): const FocusSearchIntent(),
-        const SingleActivator(LogicalKeyboardKey.f3): const OpenInventoryIntent(),
-        const SingleActivator(LogicalKeyboardKey.f4): const ShiftCutIntent(),
-        const SingleActivator(LogicalKeyboardKey.f6): const HoldSaleIntent(),
-        const SingleActivator(LogicalKeyboardKey.f7): const ViewHeldSalesIntent(),
-        const SingleActivator(LogicalKeyboardKey.f12): const CheckoutIntent(),
-        const SingleActivator(LogicalKeyboardKey.delete, alt: true): const ClearCartIntent(),
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.f1): FocusSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.f3): OpenInventoryIntent(),
+        SingleActivator(LogicalKeyboardKey.f4): ShiftCutIntent(),
+        SingleActivator(LogicalKeyboardKey.f6): HoldSaleIntent(),
+        SingleActivator(LogicalKeyboardKey.f7): ViewHeldSalesIntent(),
+        SingleActivator(LogicalKeyboardKey.f12): CheckoutIntent(),
+        SingleActivator(LogicalKeyboardKey.delete, alt: true): ClearCartIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -374,12 +396,14 @@ void _triggerCheckout() async {
           ),
           const SizedBox(width: 8),
 
-          // 2. Acceso a Catálogo e Inventario Dinámico (F3)
-          IconButton(
-            icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF1F4E79)),
-            tooltip: 'Inventario Dinámico [F3]',
-            onPressed: _openInventoryView,
-          ),
+          // 2. Acceso a Catálogo (F3) - Protegido por RBAC
+          if (widget.authController.isAdmin) ...[
+            IconButton(
+              icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF1F4E79)),
+              tooltip: 'Inventario Dinámico [F3]',
+              onPressed: _openInventoryView,
+            ),
+          ],
 
           // 3. Acceso a Cortes de Caja X y Z (F4)
           IconButton(
@@ -389,12 +413,27 @@ void _triggerCheckout() async {
           ),
           const SizedBox(width: 4),
 
-          // 4. Badge reactivo de Alertas de Escasez BI
+          // 4. Badge reactivo de Alertas de Escasez
           StockAlertsButton(alertsController: widget.alertsController),
           const SizedBox(width: 8),
 
-          // 5. Indicador reactivo de conectividad y cola Outbox
+          // 5. Indicador reactivo de conectividad
           SyncStatusBadge(syncWorker: widget.syncWorker),
+          const SizedBox(width: 8),
+
+          // 6. Botón de Bloqueo de Terminal / Logout
+          Container(
+            height: 36,
+            decoration: const BoxDecoration(
+              border: Border(left: BorderSide(color: Colors.black12)),
+            ),
+            padding: const EdgeInsets.only(left: 8.0),
+            child: IconButton(
+              icon: const Icon(Icons.lock_outline, color: Color(0xFFD32F2F)),
+              tooltip: 'Bloquear Terminal / Cerrar Sesión',
+              onPressed: _handleLogout,
+            ),
+          ),
         ],
       ),
     );
@@ -410,10 +449,10 @@ void _triggerCheckout() async {
         final items = widget.cartController.items;
 
         if (items.isEmpty) {
-          return Center(
+          return const Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
-              children: const [
+              children: [
                 Icon(Icons.shopping_cart_outlined, size: 64, color: Color(0xFF9E9E9E)),
                 SizedBox(height: 8),
                 Text(
@@ -611,7 +650,8 @@ void _triggerCheckout() async {
         alignment: WrapAlignment.center,
         children: [
           _buildKeyBadge('F1', 'Buscador', () => _refocusSearch()),
-          _buildKeyBadge('F3', 'Inventario', _openInventoryView),
+          if (widget.authController.isAdmin)
+            _buildKeyBadge('F3', 'Inventario', _openInventoryView),
           _buildKeyBadge('F4', 'Corte Caja', _openShiftCutModal),
           _buildKeyBadge('F6', 'Pausar Ticket', () {
             widget.cartController.holdCurrentSale();
