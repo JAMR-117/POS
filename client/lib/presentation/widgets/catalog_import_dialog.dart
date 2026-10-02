@@ -1,9 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-// Importaciones requeridas para resolver FilePickerResult y CsvToListConverter
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 

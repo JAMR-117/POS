@@ -23,7 +23,9 @@ import '../widgets/sync_status_badge.dart';
 import '../widgets/stock_alerts_button.dart';
 import '../widgets/shift_cut_dialog.dart';
 import '../widgets/open_shift_dialog.dart';
-
+import '../widgets/common_article_dialog.dart';
+import '../widgets/quick_product_form_dialog.dart';
+import '../../data/repositories/product_repository.dart';
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
 // ---------------------------------------------------------------------------
@@ -34,6 +36,7 @@ class ViewHeldSalesIntent extends Intent { const ViewHeldSalesIntent(); }
 class ClearCartIntent extends Intent { const ClearCartIntent(); }
 class OpenInventoryIntent extends Intent { const OpenInventoryIntent(); }
 class ShiftCutIntent extends Intent { const ShiftCutIntent(); }
+class CommonArticleIntent extends Intent { const CommonArticleIntent(); }
 
 class PosScreen extends StatefulWidget {
   final CartController cartController;
@@ -101,24 +104,52 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
-  Future<void> _handleBarcodeScan(String input) async {
+Future<void> _handleBarcodeScan(String input) async {
     final text = input.trim();
     if (text.isEmpty) return;
 
     _searchController.clear();
+    
+    // Consulta por código exacto/SKU[cite: 8, 11]
     final results = await widget.cartController.scanOrSearchProduct(text);
 
     if (results.length > 1 && mounted) {
-      _showIncrementalSearchResults(results);
-    }
+      _showIncrementalSearchResults(results); // Búsqueda incremental[cite: 8, 11]
+    } else if (results.isEmpty && mounted) {
+      // NO LO ENCONTRÓ: Preguntar al cajero si desea darlo de alta
+      final wantsToAdd = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Producto no encontrado'),
+          content: Text('El código "$text" no existe en el catálogo.\n\n¿Deseas darlo de alta rápidamente?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true), 
+              child: const Text('Agregar Producto'),
+            ),
+          ],
+        ),
+      );
 
-    // Auto-scroll al final del ticket
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      if (wantsToAdd == true) {
+        final productRepo = ProductRepository(); 
+        
+        // Abrimos el modal de Alta Rápida pasándole el código escaneado
+        final newProduct = await QuickProductFormDialog.show(context, text, productRepo);
+        
+        if (newProduct != null) {
+          // Se guardó exitosamente. Lo agregamos al ticket.
+          widget.cartController.addProduct(newProduct);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
+          );
+        }
       }
-      _refocusSearch();
-    });
+    }
+    
+    _refocusSearch(); // Restaurar autofoco[cite: 11]
   }
 
   void _showIncrementalSearchResults(List<Product> products) {
@@ -306,6 +337,7 @@ class _PosScreenState extends State<PosScreen> {
         SingleActivator(LogicalKeyboardKey.f7): ViewHeldSalesIntent(),
         SingleActivator(LogicalKeyboardKey.f12): CheckoutIntent(),
         SingleActivator(LogicalKeyboardKey.delete, alt: true): ClearCartIntent(),
+        SingleActivator(LogicalKeyboardKey.f8): CommonArticleIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
@@ -337,6 +369,10 @@ class _PosScreenState extends State<PosScreen> {
           ClearCartIntent: CallbackAction<ClearCartIntent>(onInvoke: (_) {
             widget.cartController.clearCart();
             _refocusSearch();
+            return null;
+          }),
+          CommonArticleIntent: CallbackAction<CommonArticleIntent>(onInvoke: (_) {
+            CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
             return null;
           }),
         },
@@ -391,7 +427,59 @@ class _PosScreenState extends State<PosScreen> {
                 filled: true,
                 fillColor: Color(0xFFF9FAFB),
               ),
-              onSubmitted: _handleBarcodeScan,
+              onSubmitted: (query) async {
+              final cleanQuery = query.trim();
+              if (cleanQuery.isEmpty) {
+                _refocusSearch();
+                return;
+              }
+              // 1. Intenta buscarlo en el controlador del carrito (o repositorio)
+              final productFound = await widget.cartController.scanOrSearchProduct(cleanQuery);
+
+              if (productFound == true ) {
+                // Si lo encontró, el controlador ya lo agregó al carrito.
+                _searchController.clear();
+                _refocusSearch();
+              } else {
+                // 2. NO LO ENCONTRÓ: Preguntar al cajero si desea darlo de alta
+                final wantsToAdd = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Producto no encontrado'),
+                    content: Text('El código "$cleanQuery" no existe en el catálogo.\n\n¿Deseas darlo de alta rápidamente?'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
+                        onPressed: () => Navigator.pop(ctx, true), 
+                        child: const Text('Agregar Producto'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (wantsToAdd == true) {
+                  // Instanciamos el repositorio para el formulario
+                  final productRepo = ProductRepository(); 
+
+                  // 3. Abrimos el modal de Alta Rápida
+                  final newProduct = await QuickProductFormDialog.show(context, cleanQuery, productRepo);
+
+                  if (newProduct != null) {
+                    // 4. Se guardó exitosamente en SQLite. Lo agregamos al ticket y limpiamos la barra.
+                    widget.cartController.addProduct(newProduct);
+                    _searchController.clear();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
+                    );
+                  }
+                } else {
+                  _searchController.clear();
+                }
+                _refocusSearch();
+              }
+            },
+
             ),
           ),
           const SizedBox(width: 8),
@@ -656,6 +744,9 @@ class _PosScreenState extends State<PosScreen> {
           _buildKeyBadge('F6', 'Pausar Ticket', () {
             widget.cartController.holdCurrentSale();
             _refocusSearch();
+          }),
+          _buildKeyBadge('F8', 'Art. Común', () {
+            CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
           }),
           _buildKeyBadge('F7', 'Pausados (${widget.cartController.heldSales.length})', _showHeldSalesModal),
           _buildKeyBadge('Alt+Supr', 'Limpiar', () {

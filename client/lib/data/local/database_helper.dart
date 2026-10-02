@@ -64,6 +64,8 @@ Future<void> _createDB(Database db, int version) async {
           departamento TEXT DEFAULT 'General',
           stock_actual REAL NOT NULL DEFAULT 0.0,
           es_a_granel INTEGER NOT NULL DEFAULT 0 CHECK (es_a_granel IN (0, 1)),
+          cantidad_mayoreo REAL,
+          precio_mayoreo REAL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
       );''',
@@ -77,6 +79,7 @@ Future<void> _createDB(Database db, int version) async {
           total REAL NOT NULL,
           pagos_desglose TEXT NOT NULL,
           fecha_venta TEXT NOT NULL,
+          estatus TEXT NOT NULL DEFAULT 'completado',
           FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
       );''',
       '''CREATE TABLE IF NOT EXISTS detalles_venta (
@@ -90,6 +93,14 @@ Future<void> _createDB(Database db, int version) async {
           total_linea REAL NOT NULL,
           FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
           FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
+      );''',
+      
+      '''CREATE TABLE IF NOT EXISTS usuarios (
+          id TEXT PRIMARY KEY NOT NULL,
+          nombre TEXT NOT NULL,
+          pin_acceso TEXT NOT NULL UNIQUE,
+          rol TEXT NOT NULL CHECK (rol IN ('admin', 'cajero')),
+          activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
       );''',
       '''CREATE TABLE IF NOT EXISTS sync_queue (
           id TEXT PRIMARY KEY NOT NULL,
@@ -120,6 +131,18 @@ Future<void> _createDB(Database db, int version) async {
       await db.execute(indexSql);
     }
 
+    await db.rawInsert('''
+      INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
+      VALUES ('admin-001', 'Administrador Principal', '1234', 'admin', 1);
+    ''');
+    await db.rawInsert('''
+      INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
+      VALUES ('cajero-001', 'Caja 1', '5678', 'cajero', 1);
+    ''');
+
+
+  
+
     // 3. Sembrado de productos de prueba para poder operar la caja en Web
     final nowIso = DateTime.now().toUtc().toIso8601String();
     await db.rawInsert('''
@@ -128,6 +151,15 @@ Future<void> _createDB(Database db, int version) async {
       ('prod-001', '75010001', 'SKU-001', 'Coca Cola 600ml', 12.0, 18.0, 0.16, 'Bebidas', 45.0, 0, '$nowIso', '$nowIso'),
       ('prod-002', '75010002', 'SKU-002', 'Sabritas Sal 45g', 10.0, 17.0, 0.08, 'Botanas', 30.0, 0, '$nowIso', '$nowIso'),
       ('prod-003', '75010003', 'SKU-003', 'Manzana Golden (Granel)', 25.0, 38.5, 0.00, 'Frutas', 15.750, 1, '$nowIso', '$nowIso');
+      INSERT OR IGNORE INTO productos (
+        id, codigo_barras, sku, descripcion, precio_compra, 
+        precio_venta, porcentaje_impuesto, departamento, 
+        stock_actual, es_a_granel, created_at, updated_at
+      ) VALUES (
+        'ART-COMUN', 'ART-COMUN', 'ART-COMUN', 'Artículo Común', 0.0, 
+        0.0, 0.0, 'General', 0.0, 0, 
+        datetime('now'), datetime('now')
+      );
     ''');
   }
 

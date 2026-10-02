@@ -225,6 +225,63 @@ class ShiftRepository {
 
     final esperadoEnCaja = shift.montoInicial + sumEfectivo - shift.montoRetiros;
 
+    /// Registra una entrada o salida de efectivo, actualiza el corte y genera el evento Outbox
+  Future<void> registerCashMovement({
+    required String shiftId,
+    required String tipo, // 'entrada' o 'salida'
+    required double monto,
+    required String concepto,
+  }) async {
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    final movementId = _generateUUID();
+
+    await db.transaction((txn) async {
+      // 1. Insertar el movimiento histórico
+      await txn.insert('movimientos_caja', {
+        'id': movementId,
+        'corte_caja_id': shiftId,
+        'tipo': tipo,
+        'monto': monto,
+        'concepto': concepto,
+        'fecha': isoNow,
+      });
+
+      // 2. Actualizar el acumulado en cortes_caja
+      // Salidas suman a monto_retiros, Entradas restan a monto_retiros.
+      final double signo = tipo == 'salida' ? 1.0 : -1.0;
+      
+      final updated = await txn.rawUpdate('''
+        UPDATE cortes_caja 
+        SET monto_retiros = monto_retiros + ? 
+        WHERE id = ?
+      ''', [monto * signo, shiftId]);
+      
+      if (updated == 0) {
+        throw Exception('No se encontró el turno activo para registrar el movimiento.');
+      }
+
+      // 3. Patrón Outbox: Generar evento de sincronización
+      final payload = jsonEncode({
+        'movimiento_id': movementId,
+        'corte_caja_id': shiftId,
+        'tipo': tipo,
+        'monto': monto,
+        'concepto': concepto,
+        'fecha': isoNow,
+      });
+
+      await txn.insert('sync_queue', {
+        'id': movementId,
+        'event_type': 'MOVIMIENTO_CAJA',
+        'payload': payload,
+        'sync_status': 'pending',
+        'retry_count': 0,
+        'created_at': isoNow,
+      });
+    });
+  }
+
     return ShiftSummary(
       shiftId: shiftId,
       montoInicial: shift.montoInicial,
@@ -309,6 +366,63 @@ class ShiftRepository {
         },
         conflictAlgorithm: ConflictAlgorithm.abort,
       );
+    });
+  }
+
+  /// Registra una entrada o salida de efectivo, actualiza el corte y genera el evento Outbox
+  Future<void> registerCashMovement({
+    required String shiftId,
+    required String tipo, // 'entrada' o 'salida'
+    required double monto,
+    required String concepto,
+  }) async {
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    final movementId = _generateUUID();
+
+    await db.transaction((txn) async {
+      // 1. Insertar el movimiento histórico
+      await txn.insert('movimientos_caja', {
+        'id': movementId,
+        'corte_caja_id': shiftId,
+        'tipo': tipo,
+        'monto': monto,
+        'concepto': concepto,
+        'fecha': isoNow,
+      });
+
+      // 2. Actualizar el acumulado en cortes_caja
+      // Salidas suman a monto_retiros, Entradas restan a monto_retiros.
+      final double signo = tipo == 'salida' ? 1.0 : -1.0;
+      
+      final updated = await txn.rawUpdate('''
+        UPDATE cortes_caja 
+        SET monto_retiros = monto_retiros + ? 
+        WHERE id = ?
+      ''', [monto * signo, shiftId]);
+      
+      if (updated == 0) {
+        throw Exception('No se encontró el turno activo para registrar el movimiento.');
+      }
+
+      // 3. Patrón Outbox: Generar evento de sincronización
+      final payload = jsonEncode({
+        'movimiento_id': movementId,
+        'corte_caja_id': shiftId,
+        'tipo': tipo,
+        'monto': monto,
+        'concepto': concepto,
+        'fecha': isoNow,
+      });
+
+      await txn.insert('sync_queue', {
+        'id': movementId, // Idempotencia
+        'event_type': 'MOVIMIENTO_CAJA',
+        'payload': payload,
+        'sync_status': 'pending',
+        'retry_count': 0,
+        'created_at': isoNow,
+      });
     });
   }
 

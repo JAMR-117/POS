@@ -71,6 +71,20 @@ class CartController extends ChangeNotifier {
   /// Agrega un producto al carrito.
   /// Si existe y no es a granel, incrementa cantidad en 1.
   /// Si es a granel, acumula la cantidad decimal especificada.
+
+
+  /// Lógica central para calcular el precio dinámico basado en la cantidad
+  double _determineApplicablePrice(Product product, double currentQuantity) {
+    if (product.cantidadMayoreo != null && 
+        product.precioMayoreo != null && 
+        product.cantidadMayoreo! > 0 && 
+        currentQuantity >= product.cantidadMayoreo!) {
+      return product.precioMayoreo!;
+    }
+    return product.precioVenta;
+  }
+
+  /// Agrega un producto al carrito evaluando automáticamente reglas de Mayoreo.
   void addProduct(Product product, {double quantity = 1.0}) {
     if (quantity <= 0) return;
 
@@ -82,9 +96,12 @@ class CartController extends ChangeNotifier {
           ? (current.cantidad + quantity) 
           : (current.cantidad + 1.0);
 
+      // Reevaluación de precio por volumen (Mayoreo)
+      final double applicablePrice = _determineApplicablePrice(product, newQuantity);
+
       final double newTotal = _calculateLineTotal(
         newQuantity, 
-        current.precioHistorico, 
+        applicablePrice, 
         current.descuentoLinea,
       );
 
@@ -93,15 +110,16 @@ class CartController extends ChangeNotifier {
         productoId: current.productoId,
         descripcion: current.descripcion,
         cantidad: _roundToDecimals(newQuantity, 3),
-        precioHistorico: current.precioHistorico,
+        precioHistorico: applicablePrice, // Se actualiza si cruzó el umbral
         costoHistorico: current.costoHistorico,
         descuentoLinea: current.descuentoLinea,
         totalLinea: _roundToDecimals(newTotal, 2),
       );
     } else {
+      final double applicablePrice = _determineApplicablePrice(product, quantity);
       final double totalLinea = _calculateLineTotal(
         quantity, 
-        product.precioVenta, 
+        applicablePrice, 
         0.0,
       );
 
@@ -111,7 +129,7 @@ class CartController extends ChangeNotifier {
           productoId: product.id,
           descripcion: product.descripcion,
           cantidad: _roundToDecimals(quantity, 3),
-          precioHistorico: product.precioVenta,
+          precioHistorico: applicablePrice,
           costoHistorico: product.precioCompra,
           descuentoLinea: 0.0,
           totalLinea: _roundToDecimals(totalLinea, 2),
@@ -123,8 +141,8 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Actualiza la cantidad de una partida por su ID único de línea
-  void updateQuantity(String detailItemId, double newQuantity) {
+  /// Actualiza la cantidad y recalcula la regla de mayoreo
+  void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
       removeItem(detailItemId);
       return;
@@ -134,9 +152,16 @@ class CartController extends ChangeNotifier {
     if (index == -1) return;
 
     final current = _items[index];
+    
+    // Si se pasa la referencia original del producto, reevalúa el mayoreo
+    double applicablePrice = current.precioHistorico;
+    if (referenceProduct != null) {
+       applicablePrice = _determineApplicablePrice(referenceProduct, newQuantity);
+    }
+
     final double totalLinea = _calculateLineTotal(
       newQuantity, 
-      current.precioHistorico, 
+      applicablePrice, 
       current.descuentoLinea,
     );
 
@@ -145,12 +170,31 @@ class CartController extends ChangeNotifier {
       productoId: current.productoId,
       descripcion: current.descripcion,
       cantidad: _roundToDecimals(newQuantity, 3),
-      precioHistorico: current.precioHistorico,
+      precioHistorico: applicablePrice,
       costoHistorico: current.costoHistorico,
       descuentoLinea: current.descuentoLinea,
       totalLinea: _roundToDecimals(totalLinea, 2),
     );
 
+    notifyListeners();
+  }
+
+  /// Agrega un artículo rápido que no existe en el catálogo
+  void addCommonArticle(double amount, {String description = 'Artículo Común'}) {
+    if (amount <= 0) return;
+    
+    _items.add(
+      SaleDetailItem(
+        id: _generateLocalUUID(),
+        productoId: 'ART-COMUN', // ID reservado para no afectar inventario
+        descripcion: description.isEmpty ? 'Artículo Común' : description,
+        cantidad: 1.0,
+        precioHistorico: amount,
+        costoHistorico: 0.0,
+        descuentoLinea: 0.0,
+        totalLinea: _roundToDecimals(amount, 2),
+      ),
+    );
     notifyListeners();
   }
 

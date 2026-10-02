@@ -153,6 +153,7 @@ class _CheckoutDialogState extends State<CheckoutDialog> {
           ),
           content: SizedBox(
             width: 480,
+            child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -223,8 +224,10 @@ class _CheckoutDialogState extends State<CheckoutDialog> {
                         ),
                     ],
                   ),
+                
                 ),
               ],
+            ),
             ),
           ),
           actionsPadding: const EdgeInsets.all(16.0),

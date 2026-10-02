@@ -54,6 +54,7 @@ class SyncWorker extends ChangeNotifier {
 
   /// Verifica conectividad activa real sin bloquear hilos
   Future<bool> checkConnectivity() async {
+    if (kIsWeb) return true;
     try {
       final host = Uri.parse(_apiClient.baseUrl).host;
       final target = host.isEmpty ? 'google.com' : host;

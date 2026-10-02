@@ -1,4 +1,3 @@
-/// Entidad que representa un producto del catálogo local
 class Product {
   final String id;
   final String? codigoBarras;
@@ -10,6 +9,8 @@ class Product {
   final String departamento;
   final double stockActual;
   final bool esAGranel;
+  final double? cantidadMayoreo; 
+  final double? precioMayoreo;   
 
   Product({
     required this.id,
@@ -22,6 +23,8 @@ class Product {
     required this.departamento,
     required this.stockActual,
     required this.esAGranel,
+    this.cantidadMayoreo,
+    this.precioMayoreo,
   });
 
   factory Product.fromMap(Map<String, dynamic> map) {
@@ -36,6 +39,8 @@ class Product {
       departamento: map['departamento'] as String? ?? 'General',
       stockActual: (map['stock_actual'] as num).toDouble(),
       esAGranel: (map['es_a_granel'] as int) == 1,
+      cantidadMayoreo: (map['cantidad_mayoreo'] as num?)?.toDouble(),
+      precioMayoreo: (map['precio_mayoreo'] as num?)?.toDouble(),
     );
   }
 
@@ -51,6 +56,8 @@ class Product {
       'departamento': departamento,
       'stock_actual': stockActual,
       'es_a_granel': esAGranel ? 1 : 0,
+      'cantidad_mayoreo': cantidadMayoreo,
+      'precio_mayoreo': precioMayoreo,
     };
   }
 }

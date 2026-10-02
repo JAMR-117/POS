@@ -152,3 +152,18 @@ CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);
 
 
 ALTER TABLE ventas ADD COLUMN estatus TEXT NOT NULL DEFAULT 'completado' CHECK (estatus IN ('completado', 'cancelado'));
+
+-- ----------------------------------------------------------------------------
+-- 9. TABLA DE MOVIMIENTOS DE CAJA (ENTRADAS / SALIDAS)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS movimientos_caja (
+    id TEXT PRIMARY KEY NOT NULL,
+    corte_caja_id TEXT NOT NULL,
+    tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'salida')),
+    monto REAL NOT NULL,
+    concepto TEXT NOT NULL,
+    fecha TEXT NOT NULL,
+    FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX IF NOT EXISTS idx_movimientos_corte_id ON movimientos_caja(corte_caja_id);
