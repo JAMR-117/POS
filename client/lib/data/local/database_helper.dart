@@ -53,6 +53,16 @@ Future<void> _createDB(Database db, int version) async {
           fecha_cierre TEXT,
           estado TEXT NOT NULL DEFAULT 'abierto' CHECK (estado IN ('abierto', 'cerrado'))
       );''',
+      '''CREATE TABLE IF NOT EXISTS movimientos_caja (
+          id TEXT PRIMARY KEY NOT NULL,
+          corte_caja_id TEXT NOT NULL,
+          tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'salida')),
+          monto REAL NOT NULL,
+          concepto TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
+      );''',
       '''CREATE TABLE IF NOT EXISTS productos (
           id TEXT PRIMARY KEY NOT NULL,
           codigo_barras TEXT UNIQUE,
@@ -101,6 +111,23 @@ Future<void> _createDB(Database db, int version) async {
           pin_acceso TEXT NOT NULL UNIQUE,
           rol TEXT NOT NULL CHECK (rol IN ('admin', 'cajero')),
           activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
+      );''',
+      '''CREATE TABLE IF NOT EXISTS clientes (
+          id TEXT PRIMARY KEY NOT NULL,
+          nombre TEXT NOT NULL,
+          rfc_o_dni TEXT,
+          telefono TEXT,
+          limite_credito REAL NOT NULL DEFAULT 0.0,
+          saldo_deudor REAL NOT NULL DEFAULT 0.0,
+          created_at TEXT NOT NULL
+      );''',
+      '''CREATE TABLE IF NOT EXISTS abonos_credito (
+          id TEXT PRIMARY KEY NOT NULL,
+          cliente_id TEXT NOT NULL,
+          corte_caja_id TEXT NOT NULL,
+          monto REAL NOT NULL,
+          fecha TEXT NOT NULL,
+          FOREIGN KEY (cliente_id) REFERENCES clientes(id)
       );''',
       '''CREATE TABLE IF NOT EXISTS sync_queue (
           id TEXT PRIMARY KEY NOT NULL,
@@ -151,6 +178,8 @@ Future<void> _createDB(Database db, int version) async {
       ('prod-001', '75010001', 'SKU-001', 'Coca Cola 600ml', 12.0, 18.0, 0.16, 'Bebidas', 45.0, 0, '$nowIso', '$nowIso'),
       ('prod-002', '75010002', 'SKU-002', 'Sabritas Sal 45g', 10.0, 17.0, 0.08, 'Botanas', 30.0, 0, '$nowIso', '$nowIso'),
       ('prod-003', '75010003', 'SKU-003', 'Manzana Golden (Granel)', 25.0, 38.5, 0.00, 'Frutas', 15.750, 1, '$nowIso', '$nowIso');
+      INSERT OR IGNORE INTO clientes (id, nombre, limite_credito, saldo_deudor, created_at) 
+      VALUES ('PUBLICO-GRAL', 'Público en General', 0.0, 0.0, datetime('now'));
       INSERT OR IGNORE INTO productos (
         id, codigo_barras, sku, descripcion, precio_compra, 
         precio_venta, porcentaje_impuesto, departamento, 

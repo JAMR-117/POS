@@ -141,6 +141,21 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
+    // --------------------------------------------------------
+  // DATOS DEL CLIENTE ACTIVO (Asignación en Caja)
+  // --------------------------------------------------------
+  String _selectedClientId = 'PUBLICO-GRAL';
+  String _selectedClientName = 'Público en General';
+
+  String get selectedClientId => _selectedClientId;
+  String get selectedClientName => _selectedClientName;
+
+  void setClient(String id, String name) {
+    _selectedClientId = id;
+    _selectedClientName = name;
+    notifyListeners();
+  }
+
   /// Actualiza la cantidad y recalcula la regla de mayoreo
   void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
@@ -234,8 +249,10 @@ class CartController extends ChangeNotifier {
   }
 
   /// Limpia todo el ticket activo en milisegundos
-  void clearCart() {
+void clearCart() {
     _items.clear();
+    _selectedClientId = 'PUBLICO-GRAL';    
+    _selectedClientName = 'Público en General'; 
     _clearError();
     notifyListeners();
   }
@@ -271,6 +288,8 @@ class CartController extends ChangeNotifier {
       return [];
     }
   }
+
+
 
   /// Valida pagos, registra la venta en SQLite atómicamente y limpia el estado
   Future<double> checkout({

@@ -154,3 +154,32 @@ class SaleTransactionRequest {
     DateTime? fechaVenta,
   }) : fechaVenta = fechaVenta ?? DateTime.now().toUtc();
 }
+
+class Cliente {
+  final String id;
+  final String nombre;
+  final String? rfcODni;
+  final String? telefono;
+  final double limiteCredito;
+  final double saldoDeudor;
+
+  Cliente({
+    required this.id,
+    required this.nombre,
+    this.rfcODni,
+    this.telefono,
+    required this.limiteCredito,
+    required this.saldoDeudor,
+  });
+
+  factory Cliente.fromMap(Map<String, dynamic> map) {
+    return Cliente(
+      id: map['id'] as String,
+      nombre: map['nombre'] as String,
+      rfcODni: map['rfc_o_dni'] as String?,
+      telefono: map['telefono'] as String?,
+      limiteCredito: (map['limite_credito'] as num).toDouble(),
+      saldoDeudor: (map['saldo_deudor'] as num).toDouble(),
+    );
+  }
+}

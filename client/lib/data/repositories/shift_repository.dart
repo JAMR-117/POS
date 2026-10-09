@@ -226,6 +226,7 @@ class ShiftRepository {
     final esperadoEnCaja = shift.montoInicial + sumEfectivo - shift.montoRetiros;
 
     /// Registra una entrada o salida de efectivo, actualiza el corte y genera el evento Outbox
+  /// Registra una entrada o salida de efectivo, ajustando el saldo del turno activo
   Future<void> registerCashMovement({
     required String shiftId,
     required String tipo, // 'entrada' o 'salida'
@@ -233,37 +234,34 @@ class ShiftRepository {
     required String concepto,
   }) async {
     final db = await _dbHelper.database;
+    final id = _generateUUID();
     final isoNow = DateTime.now().toUtc().toIso8601String();
-    final movementId = _generateUUID();
 
     await db.transaction((txn) async {
-      // 1. Insertar el movimiento histórico
+      // 1. Historial del movimiento
       await txn.insert('movimientos_caja', {
-        'id': movementId,
+        'id': id,
         'corte_caja_id': shiftId,
         'tipo': tipo,
         'monto': monto,
         'concepto': concepto,
         'fecha': isoNow,
+        'created_at': isoNow,
       });
 
-      // 2. Actualizar el acumulado en cortes_caja
-      // Salidas suman a monto_retiros, Entradas restan a monto_retiros.
-      final double signo = tipo == 'salida' ? 1.0 : -1.0;
-      
-      final updated = await txn.rawUpdate('''
-        UPDATE cortes_caja 
-        SET monto_retiros = monto_retiros + ? 
-        WHERE id = ?
-      ''', [monto * signo, shiftId]);
-      
-      if (updated == 0) {
-        throw Exception('No se encontró el turno activo para registrar el movimiento.');
-      }
+      // 2. Ajuste del acumulador en cortes_caja
+      // Si es salida (retiro), suma a monto_retiros. Si es entrada (fondo extra), resta a monto_retiros.
+      final modifier = tipo == 'salida' ? monto : -monto;
+      final updated = await txn.rawUpdate(
+        'UPDATE cortes_caja SET monto_retiros = monto_retiros + ? WHERE id = ?',
+        [modifier, shiftId]
+      );
 
-      // 3. Patrón Outbox: Generar evento de sincronización
+      if (updated == 0) throw Exception('Turno no encontrado para registrar movimiento.');
+
+      // 3. Cola de sincronización (Outbox)
       final payload = jsonEncode({
-        'movimiento_id': movementId,
+        'movimiento_id': id,
         'corte_caja_id': shiftId,
         'tipo': tipo,
         'monto': monto,
@@ -272,7 +270,7 @@ class ShiftRepository {
       });
 
       await txn.insert('sync_queue', {
-        'id': movementId,
+        'id': id,
         'event_type': 'MOVIMIENTO_CAJA',
         'payload': payload,
         'sync_status': 'pending',

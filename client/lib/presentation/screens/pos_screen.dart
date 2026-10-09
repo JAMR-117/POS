@@ -26,6 +26,7 @@ import '../widgets/open_shift_dialog.dart';
 import '../widgets/common_article_dialog.dart';
 import '../widgets/quick_product_form_dialog.dart';
 import '../../data/repositories/product_repository.dart';
+import '../widgets/client_selection_dialog.dart';
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
 // ---------------------------------------------------------------------------
@@ -406,12 +407,41 @@ Future<void> _handleBarcodeScan(String input) async {
   // ---------------------------------------------------------------------------
   // BARRA SUPERIOR DE ENTRADA / ESCÁNER
   // ---------------------------------------------------------------------------
+  // ---------------------------------------------------------------------------
+  // BARRA SUPERIOR DE ENTRADA / ESCÁNER
+  // ---------------------------------------------------------------------------
   Widget _buildHeaderBar() {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
       child: Row(
         children: [
+          // 0. Botón de Asignación de Cliente (Iteración 3)
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: const Color(0xFF1F4E79),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              side: const BorderSide(color: Color(0xFFCFD8DC)), // Borde sutil
+            ),
+            icon: const Icon(Icons.person_outline),
+            label: AnimatedBuilder(
+              animation: widget.cartController,
+              builder: (context, _) => Text(
+                widget.cartController.selectedClientName,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+            onPressed: () async {
+              final selectedClient = await ClientSelectionDialog.show(context);
+              if (selectedClient != null && mounted) {
+                widget.cartController.setClient(selectedClient.id, selectedClient.nombre);
+              }
+              _refocusSearch();
+            },
+          ),
+          const SizedBox(width: 12),
+
           // 1. Campo de texto para escáner / buscador manual
           Expanded(
             child: TextField(
@@ -427,71 +457,19 @@ Future<void> _handleBarcodeScan(String input) async {
                 filled: true,
                 fillColor: Color(0xFFF9FAFB),
               ),
-              onSubmitted: (query) async {
-              final cleanQuery = query.trim();
-              if (cleanQuery.isEmpty) {
-                _refocusSearch();
-                return;
-              }
-              // 1. Intenta buscarlo en el controlador del carrito (o repositorio)
-              final productFound = await widget.cartController.scanOrSearchProduct(cleanQuery);
-
-              if (productFound == true ) {
-                // Si lo encontró, el controlador ya lo agregó al carrito.
-                _searchController.clear();
-                _refocusSearch();
-              } else {
-                // 2. NO LO ENCONTRÓ: Preguntar al cajero si desea darlo de alta
-                final wantsToAdd = await showDialog<bool>(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Text('Producto no encontrado'),
-                    content: Text('El código "$cleanQuery" no existe en el catálogo.\n\n¿Deseas darlo de alta rápidamente?'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
-                        onPressed: () => Navigator.pop(ctx, true), 
-                        child: const Text('Agregar Producto'),
-                      ),
-                    ],
-                  ),
-                );
-
-                if (wantsToAdd == true) {
-                  // Instanciamos el repositorio para el formulario
-                  final productRepo = ProductRepository(); 
-
-                  // 3. Abrimos el modal de Alta Rápida
-                  final newProduct = await QuickProductFormDialog.show(context, cleanQuery, productRepo);
-
-                  if (newProduct != null) {
-                    // 4. Se guardó exitosamente en SQLite. Lo agregamos al ticket y limpiamos la barra.
-                    widget.cartController.addProduct(newProduct);
-                    _searchController.clear();
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
-                    );
-                  }
-                } else {
-                  _searchController.clear();
-                }
-                _refocusSearch();
-              }
-            },
-
+              // Delegamos la validación del Producto Nuevo al método centralizado
+              onSubmitted: _handleBarcodeScan, 
             ),
           ),
           const SizedBox(width: 8),
 
-          // 2. Acceso a Catálogo (F3) - Protegido por RBAC
-          if (widget.authController.isAdmin) ...[
+          // 2. Acceso a Catálogo e Inventario (F3) - Protegido por RBAC
+          if (widget.authController.isAdmin)
             IconButton(
               icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF1F4E79)),
               tooltip: 'Inventario Dinámico [F3]',
               onPressed: _openInventoryView,
             ),
-          ],
 
           // 3. Acceso a Cortes de Caja X y Z (F4)
           IconButton(
@@ -501,11 +479,11 @@ Future<void> _handleBarcodeScan(String input) async {
           ),
           const SizedBox(width: 4),
 
-          // 4. Badge reactivo de Alertas de Escasez
+          // 4. Badge reactivo de Alertas de Escasez BI
           StockAlertsButton(alertsController: widget.alertsController),
           const SizedBox(width: 8),
 
-          // 5. Indicador reactivo de conectividad
+          // 5. Indicador reactivo de conectividad (Cola Outbox)
           SyncStatusBadge(syncWorker: widget.syncWorker),
           const SizedBox(width: 8),
 

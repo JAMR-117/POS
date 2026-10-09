@@ -93,11 +93,8 @@ class ShiftController extends ChangeNotifier {
   }
 
   /// Registra un movimiento y actualiza las métricas del Corte X en memoria
-  Future<void> registerCashMovement({
-    required String tipo,
-    required double monto,
-    required String concepto,
-  }) async {
+/// Registra un movimiento y actualiza las métricas en memoria
+  Future<void> registerCashMovement(String tipo, double monto, String concepto) async {
     if (!hasActiveShift) {
       throw Exception('No hay un turno activo para realizar movimientos.');
     }
@@ -111,8 +108,7 @@ class ShiftController extends ChangeNotifier {
         concepto: concepto,
       );
       
-      // Refresca el resumen para que el Corte X refleje el movimiento inmediatamente
-      await loadShiftSummary(); 
+      await loadShiftSummary(); // Refresca el Corte X
       _errorMessage = null;
     } catch (e) {
       _errorMessage = e.toString();

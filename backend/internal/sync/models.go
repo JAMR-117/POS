@@ -63,3 +63,61 @@ type SyncBatchResponse struct {
 	Acks   []string          `json:"acks"`
 	Errors map[string]string `json:"errors"`
 }
+
+// CancelSalePayload mapea el evento 'VENTA_CANCELADA'
+type CancelSalePayload struct {
+	VentaID          string    `json:"venta_id"`
+	FechaCancelacion time.Time `json:"fecha_cancelacion"`
+	Motivo           string    `json:"motivo"`
+}
+
+// InventoryAdjustmentPayload mapea el evento 'AJUSTE_INVENTARIO'
+type InventoryAdjustmentPayload struct {
+	AjusteID      string    `json:"ajuste_id"`
+	ProductoID    string    `json:"producto_id"`
+	StockTeorico  float64   `json:"stock_teorico"`
+	StockFisico   float64   `json:"stock_fisico"`
+	Diferencia    float64   `json:"diferencia"`
+	Motivo        string    `json:"motivo"`
+	AutorizadoPor string    `json:"autorizado_por"`
+	FechaAjuste   time.Time `json:"fecha_ajuste"`
+}
+
+// CashMovementPayload mapea el evento 'MOVIMIENTO_CAJA'
+type CashMovementPayload struct {
+	MovimientoID string    `json:"movimiento_id"`
+	CorteCajaID  string    `json:"corte_caja_id"`
+	Tipo         string    `json:"tipo"`
+	Monto        float64   `json:"monto"`
+	Concepto     string    `json:"concepto"`
+	Fecha        time.Time `json:"fecha"`
+}
+
+// ShiftTotalsDTO encapsula las métricas consolidadas del Corte Z
+type ShiftTotalsDTO struct {
+	MontoInicial      float64 `json:"monto_inicial"`
+	VentasEfectivo    float64 `json:"ventas_efectivo"`
+	VentasTarjeta     float64 `json:"ventas_tarjeta"`
+	VentasOtros       float64 `json:"ventas_otros"`
+	TotalVentas       float64 `json:"total_ventas"`
+	TotalTickets      int     `json:"total_tickets"`
+	EfectivoEsperado  float64 `json:"efectivo_esperado"`
+	EfectivoDeclarado float64 `json:"efectivo_declarado"`
+	Discrepancia      float64 `json:"discrepancia"`
+}
+
+// ShiftCutPayload mapea el evento 'CORTE_CAJA_REGISTRADO'
+type ShiftCutPayload struct {
+	CorteCajaID string         `json:"corte_caja_id"`
+	TipoCorte   string         `json:"tipo_corte"`
+	Totales     ShiftTotalsDTO `json:"totales"`
+	FechaCierre time.Time      `json:"fecha_cierre"`
+}
+
+// CreditPaymentPayload mapea el evento 'ABONO_REGISTRADO'
+type CreditPaymentPayload struct {
+	AbonoID   string    `json:"abono_id"`
+	ClienteID string    `json:"cliente_id"`
+	Monto     float64   `json:"monto"`
+	Fecha     time.Time `json:"fecha"`
+}
