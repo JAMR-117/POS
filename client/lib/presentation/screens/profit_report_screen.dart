@@ -64,7 +64,7 @@ class _ProfitReportScreenState extends State<ProfitReportScreen> {
       builder: (context, child) {
         return Theme(
           data: ThemeData.light().copyWith(
-            colorScheme: const ColorScheme.light(primary: const Color(0xFF1F4E79)),
+            colorScheme: const ColorScheme.light(primary: Color(0xFF1F4E79)),
           ),
           child: child!,
         );

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'database_seeder.dart';
+import 'models.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
@@ -21,21 +23,29 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 1,
-      onCreate: _createDB,
+      version: 3,
       onConfigure: _onConfigure,
+      onCreate: _createDB,
+      onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
   }
 
   /// Configura pragmas de bajo nivel y baja latencia para hardware limitado
   Future<void> _onConfigure(Database db) async {
-      await db.execute('PRAGMA foreign_keys = ON;');
-      if (!kIsWeb) {
-        await db.execute('PRAGMA journal_mode = WAL;');
-        await db.execute('PRAGMA synchronous = NORMAL;');
-      }
+    await db.execute('PRAGMA foreign_keys = ON;');
+    if (!kIsWeb) {
+      await db.execute('PRAGMA journal_mode = WAL;');
+      await db.execute('PRAGMA synchronous = NORMAL;');
     }
-Future<void> _createDB(Database db, int version) async {
+  }
+
+  Future<void> _onOpen(Database db) async {
+    // Garantiza que los registros semilla permanentes siempre existan
+    await DatabaseSeeder.seed(db);
+  }
+
+  Future<void> _createDB(Database db, int version) async {
     // 1. Creación secuencial de tablas principales
     final List<String> tables = [
       '''CREATE TABLE IF NOT EXISTS cortes_caja (
@@ -53,31 +63,37 @@ Future<void> _createDB(Database db, int version) async {
           fecha_cierre TEXT,
           estado TEXT NOT NULL DEFAULT 'abierto' CHECK (estado IN ('abierto', 'cerrado'))
       );''',
-      '''CREATE TABLE IF NOT EXISTS movimientos_caja (
+      '''CREATE TABLE IF NOT EXISTS departamentos (
           id TEXT PRIMARY KEY NOT NULL,
-          corte_caja_id TEXT NOT NULL,
-          tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'salida')),
-          monto REAL NOT NULL,
-          concepto TEXT NOT NULL,
-          fecha TEXT NOT NULL,
-          created_at TEXT NOT NULL,
-          FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
+          nombre TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL
       );''',
       '''CREATE TABLE IF NOT EXISTS productos (
           id TEXT PRIMARY KEY NOT NULL,
           codigo_barras TEXT UNIQUE,
           sku TEXT UNIQUE,
+          nombre TEXT NOT NULL,
           descripcion TEXT NOT NULL,
+          marca TEXT,
+          codigo_equivalencia TEXT,
+          ubicacion TEXT,
           precio_compra REAL NOT NULL DEFAULT 0.0,
           precio_venta REAL NOT NULL,
+          precio_cerrajero REAL,
+          precio_taller REAL,
           porcentaje_impuesto REAL NOT NULL DEFAULT 0.0,
           departamento TEXT DEFAULT 'General',
           stock_actual REAL NOT NULL DEFAULT 0.0,
+          stock_minimo REAL NOT NULL DEFAULT 5.0,
           es_a_granel INTEGER NOT NULL DEFAULT 0 CHECK (es_a_granel IN (0, 1)),
           cantidad_mayoreo REAL,
           precio_mayoreo REAL,
+          es_servicio INTEGER NOT NULL DEFAULT 0 CHECK (es_servicio IN (0, 1)),
+          insumo_vinculado_id TEXT,
+          cantidad_insumo REAL NOT NULL DEFAULT 1.0,
           created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
+          updated_at TEXT NOT NULL,
+          FOREIGN KEY (insumo_vinculado_id) REFERENCES productos(id) ON DELETE SET NULL
       );''',
       '''CREATE TABLE IF NOT EXISTS ventas (
           id TEXT PRIMARY KEY NOT NULL,
@@ -89,7 +105,7 @@ Future<void> _createDB(Database db, int version) async {
           total REAL NOT NULL,
           pagos_desglose TEXT NOT NULL,
           fecha_venta TEXT NOT NULL,
-          estatus TEXT NOT NULL DEFAULT 'completado',
+          estatus TEXT NOT NULL DEFAULT 'completado' CHECK (estatus IN ('completado', 'cancelado')),
           FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
       );''',
       '''CREATE TABLE IF NOT EXISTS detalles_venta (
@@ -104,21 +120,28 @@ Future<void> _createDB(Database db, int version) async {
           FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
           FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
       );''',
-      
       '''CREATE TABLE IF NOT EXISTS usuarios (
           id TEXT PRIMARY KEY NOT NULL,
           nombre TEXT NOT NULL,
           pin_acceso TEXT NOT NULL UNIQUE,
           rol TEXT NOT NULL CHECK (rol IN ('admin', 'cajero')),
+          permisos TEXT,
           activo INTEGER NOT NULL DEFAULT 1 CHECK (activo IN (0, 1))
       );''',
       '''CREATE TABLE IF NOT EXISTS clientes (
           id TEXT PRIMARY KEY NOT NULL,
           nombre TEXT NOT NULL,
           rfc_o_dni TEXT,
+          regimen_fiscal TEXT,
+          uso_cfdi TEXT,
+          codigo_postal TEXT,
+          correo TEXT,
           telefono TEXT,
+          direccion TEXT,
           limite_credito REAL NOT NULL DEFAULT 0.0,
           saldo_deudor REAL NOT NULL DEFAULT 0.0,
+          tarifa_preferencial TEXT NOT NULL DEFAULT 'Público',
+          activo INTEGER NOT NULL DEFAULT 1,
           created_at TEXT NOT NULL
       );''',
       '''CREATE TABLE IF NOT EXISTS abonos_credito (
@@ -129,6 +152,29 @@ Future<void> _createDB(Database db, int version) async {
           fecha TEXT NOT NULL,
           FOREIGN KEY (cliente_id) REFERENCES clientes(id)
       );''',
+      '''CREATE TABLE IF NOT EXISTS movimientos_caja (
+          id TEXT PRIMARY KEY NOT NULL,
+          corte_caja_id TEXT NOT NULL,
+          tipo TEXT NOT NULL CHECK (tipo IN ('entrada', 'salida')),
+          monto REAL NOT NULL,
+          concepto TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
+      );''',
+      '''CREATE TABLE IF NOT EXISTS movimientos_inventario (
+          id TEXT PRIMARY KEY NOT NULL,
+          producto_id TEXT NOT NULL,
+          producto_desc TEXT NOT NULL,
+          tipo TEXT NOT NULL CHECK (tipo IN ('VENTA', 'ENTRADA', 'AJUSTE', 'DEVOLUCION')),
+          cantidad REAL NOT NULL,
+          stock_anterior REAL NOT NULL,
+          stock_nuevo REAL NOT NULL,
+          usuario_id TEXT NOT NULL,
+          departamento TEXT,
+          motivo TEXT,
+          fecha TEXT NOT NULL,
+          created_at TEXT NOT NULL
+      );''',
       '''CREATE TABLE IF NOT EXISTS sync_queue (
           id TEXT PRIMARY KEY NOT NULL,
           event_type TEXT NOT NULL,
@@ -138,6 +184,16 @@ Future<void> _createDB(Database db, int version) async {
           error_code TEXT,
           created_at TEXT NOT NULL,
           synced_at TEXT
+      );''',
+      '''CREATE TABLE IF NOT EXISTS app_metadata (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+      );''',
+      '''CREATE TABLE IF NOT EXISTS configuracion_negocio (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL,
+          updated_at TEXT NOT NULL
       );'''
     ];
 
@@ -145,51 +201,211 @@ Future<void> _createDB(Database db, int version) async {
       await db.execute(tableSql);
     }
 
-    // 2. Creación de índices una vez que todas las tablas existen
+    // 2. Creación de índices
     final List<String> indices = [
       'CREATE INDEX IF NOT EXISTS idx_productos_codigo_barras ON productos(codigo_barras);',
       'CREATE INDEX IF NOT EXISTS idx_productos_sku ON productos(sku);',
+      'CREATE INDEX IF NOT EXISTS idx_productos_equivalencia ON productos(codigo_equivalencia);',
+      'CREATE INDEX IF NOT EXISTS idx_productos_nombre ON productos(nombre);',
+      'CREATE INDEX IF NOT EXISTS idx_productos_marca ON productos(marca);',
+      'CREATE INDEX IF NOT EXISTS idx_mov_inv_prod ON movimientos_inventario(producto_id);',
+      'CREATE INDEX IF NOT EXISTS idx_mov_inv_fecha ON movimientos_inventario(fecha);',
       'CREATE INDEX IF NOT EXISTS idx_sync_queue_status_created ON sync_queue(sync_status, created_at);',
       'CREATE INDEX IF NOT EXISTS idx_ventas_corte_id ON ventas(corte_caja_id);',
-      'CREATE INDEX IF NOT EXISTS idx_detalles_venta_venta_id ON detalles_venta(venta_id);'
+      'CREATE INDEX IF NOT EXISTS idx_detalles_venta_venta_id ON detalles_venta(venta_id);',
+      'CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);',
+      'CREATE INDEX IF NOT EXISTS idx_movimientos_corte_id ON movimientos_caja(corte_caja_id);'
     ];
 
     for (final indexSql in indices) {
       await db.execute(indexSql);
     }
 
-    await db.rawInsert('''
-      INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
-      VALUES ('admin-001', 'Administrador Principal', '1234', 'admin', 1);
-    ''');
-    await db.rawInsert('''
-      INSERT OR IGNORE INTO usuarios (id, nombre, pin_acceso, rol, activo) 
-      VALUES ('cajero-001', 'Caja 1', '5678', 'cajero', 1);
-    ''');
+    await DatabaseSeeder.seed(db);
+  }
 
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // Migración acumulativa segura para cualquier versión anterior
+    final tableInfoProd = await db.rawQuery('PRAGMA table_info(productos);');
+    final prodCols = tableInfoProd.map((col) => col['name'] as String).toSet();
 
-  
+    if (!prodCols.contains('nombre')) {
+      await db.execute("ALTER TABLE productos ADD COLUMN nombre TEXT NOT NULL DEFAULT '';");
+      await db.execute("UPDATE productos SET nombre = descripcion WHERE nombre = '';");
+    }
+    if (!prodCols.contains('marca')) await db.execute("ALTER TABLE productos ADD COLUMN marca TEXT;");
+    if (!prodCols.contains('codigo_equivalencia')) await db.execute("ALTER TABLE productos ADD COLUMN codigo_equivalencia TEXT;");
+    if (!prodCols.contains('ubicacion')) await db.execute("ALTER TABLE productos ADD COLUMN ubicacion TEXT;");
+    if (!prodCols.contains('es_servicio')) await db.execute("ALTER TABLE productos ADD COLUMN es_servicio INTEGER NOT NULL DEFAULT 0;");
+    if (!prodCols.contains('insumo_vinculado_id')) await db.execute("ALTER TABLE productos ADD COLUMN insumo_vinculado_id TEXT;");
+    if (!prodCols.contains('cantidad_insumo')) await db.execute("ALTER TABLE productos ADD COLUMN cantidad_insumo REAL NOT NULL DEFAULT 1.0;");
+    if (!prodCols.contains('cantidad_mayoreo')) await db.execute("ALTER TABLE productos ADD COLUMN cantidad_mayoreo REAL;");
+    if (!prodCols.contains('precio_mayoreo')) await db.execute("ALTER TABLE productos ADD COLUMN precio_mayoreo REAL;");
+    
+    // Nivel 2 y 3 de precios y stock mínimo (v3)
+    if (!prodCols.contains('precio_cerrajero')) await db.execute("ALTER TABLE productos ADD COLUMN precio_cerrajero REAL;");
+    if (!prodCols.contains('precio_taller')) await db.execute("ALTER TABLE productos ADD COLUMN precio_taller REAL;");
+    if (!prodCols.contains('stock_minimo')) await db.execute("ALTER TABLE productos ADD COLUMN stock_minimo REAL NOT NULL DEFAULT 5.0;");
 
-    // 3. Sembrado de productos de prueba para poder operar la caja en Web
+    // Clientes extendidos
+    final tableInfoCli = await db.rawQuery('PRAGMA table_info(clientes);');
+    final cliCols = tableInfoCli.map((col) => col['name'] as String).toSet();
+    if (!cliCols.contains('regimen_fiscal')) await db.execute("ALTER TABLE clientes ADD COLUMN regimen_fiscal TEXT;");
+    if (!cliCols.contains('uso_cfdi')) await db.execute("ALTER TABLE clientes ADD COLUMN uso_cfdi TEXT;");
+    if (!cliCols.contains('codigo_postal')) await db.execute("ALTER TABLE clientes ADD COLUMN codigo_postal TEXT;");
+    if (!cliCols.contains('correo')) await db.execute("ALTER TABLE clientes ADD COLUMN correo TEXT;");
+    if (!cliCols.contains('direccion')) await db.execute("ALTER TABLE clientes ADD COLUMN direccion TEXT;");
+    if (!cliCols.contains('tarifa_preferencial')) await db.execute("ALTER TABLE clientes ADD COLUMN tarifa_preferencial TEXT NOT NULL DEFAULT 'Público';");
+
+    // Usuarios: permisos
+    final tableInfoUsr = await db.rawQuery('PRAGMA table_info(usuarios);');
+    final usrCols = tableInfoUsr.map((col) => col['name'] as String).toSet();
+    if (!usrCols.contains('permisos')) await db.execute("ALTER TABLE usuarios ADD COLUMN permisos TEXT;");
+
+    // Tablas nuevas
+    await db.execute('''CREATE TABLE IF NOT EXISTS departamentos (
+        id TEXT PRIMARY KEY NOT NULL,
+        nombre TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+    );''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS movimientos_inventario (
+        id TEXT PRIMARY KEY NOT NULL,
+        producto_id TEXT NOT NULL,
+        producto_desc TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK (tipo IN ('VENTA', 'ENTRADA', 'AJUSTE', 'DEVOLUCION')),
+        cantidad REAL NOT NULL,
+        stock_anterior REAL NOT NULL,
+        stock_nuevo REAL NOT NULL,
+        usuario_id TEXT NOT NULL,
+        departamento TEXT,
+        motivo TEXT,
+        fecha TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );''');
+
+    await db.execute('''CREATE TABLE IF NOT EXISTS configuracion_negocio (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );''');
+
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_mov_inv_prod ON movimientos_inventario(producto_id);');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_mov_inv_fecha ON movimientos_inventario(fecha);');
+
+    await DatabaseSeeder.seed(db);
+  }
+
+  // Kardex de Inventario
+  Future<void> logInventoryMovement({
+    required DatabaseExecutor db,
+    required String productoId,
+    required String productoDesc,
+    required String tipo,
+    required double cantidad,
+    required double stockAnterior,
+    required double stockNuevo,
+    required String usuarioId,
+    String? departamento,
+    String? motivo,
+  }) async {
     final nowIso = DateTime.now().toUtc().toIso8601String();
-    await db.rawInsert('''
-      INSERT OR IGNORE INTO productos (id, codigo_barras, sku, descripcion, precio_compra, precio_venta, porcentaje_impuesto, departamento, stock_actual, es_a_granel, created_at, updated_at)
-      VALUES 
-      ('prod-001', '75010001', 'SKU-001', 'Coca Cola 600ml', 12.0, 18.0, 0.16, 'Bebidas', 45.0, 0, '$nowIso', '$nowIso'),
-      ('prod-002', '75010002', 'SKU-002', 'Sabritas Sal 45g', 10.0, 17.0, 0.08, 'Botanas', 30.0, 0, '$nowIso', '$nowIso'),
-      ('prod-003', '75010003', 'SKU-003', 'Manzana Golden (Granel)', 25.0, 38.5, 0.00, 'Frutas', 15.750, 1, '$nowIso', '$nowIso');
-      INSERT OR IGNORE INTO clientes (id, nombre, limite_credito, saldo_deudor, created_at) 
-      VALUES ('PUBLICO-GRAL', 'Público en General', 0.0, 0.0, datetime('now'));
-      INSERT OR IGNORE INTO productos (
-        id, codigo_barras, sku, descripcion, precio_compra, 
-        precio_venta, porcentaje_impuesto, departamento, 
-        stock_actual, es_a_granel, created_at, updated_at
-      ) VALUES (
-        'ART-COMUN', 'ART-COMUN', 'ART-COMUN', 'Artículo Común', 0.0, 
-        0.0, 0.0, 'General', 0.0, 0, 
-        datetime('now'), datetime('now')
-      );
-    ''');
+    final id = 'MOV_${DateTime.now().microsecondsSinceEpoch}';
+
+    await db.insert('movimientos_inventario', {
+      'id': id,
+      'producto_id': productoId,
+      'producto_desc': productoDesc,
+      'tipo': tipo,
+      'cantidad': cantidad,
+      'stock_anterior': stockAnterior,
+      'stock_nuevo': stockNuevo,
+      'usuario_id': usuarioId,
+      'departamento': departamento,
+      'motivo': motivo,
+      'fecha': nowIso,
+      'created_at': nowIso,
+    });
+  }
+
+  Future<List<InventoryMovementRecord>> getInventoryMovements({int limit = 100}) async {
+    final db = await database;
+    final results = await db.query(
+      'movimientos_inventario',
+      orderBy: 'fecha DESC',
+      limit: limit,
+    );
+    return results.map((r) => InventoryMovementRecord.fromMap(r)).toList();
+  }
+
+  // Metadatos y Sincronización
+  Future<String?> getMetadata(String key) async {
+    final db = await database;
+    final results = await db.query(
+      'app_metadata',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (results.isNotEmpty) {
+      return results.first['value'] as String?;
+    }
+    return null;
+  }
+
+  Future<void> setMetadata(String key, String value) async {
+    final db = await database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    await db.insert(
+      'app_metadata',
+      {
+        'key': key,
+        'value': value,
+        'updated_at': isoNow,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // Configuración del Negocio y Sistema
+  Future<String?> getConfig(String key) async {
+    final db = await database;
+    final results = await db.query(
+      'configuracion_negocio',
+      columns: ['value'],
+      where: 'key = ?',
+      whereArgs: [key],
+      limit: 1,
+    );
+    if (results.isNotEmpty) {
+      return results.first['value'] as String?;
+    }
+    return null;
+  }
+
+  Future<void> setConfig(String key, String value) async {
+    final db = await database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    await db.insert(
+      'configuracion_negocio',
+      {
+        'key': key,
+        'value': value,
+        'updated_at': isoNow,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, String>> getAllConfig() async {
+    final db = await database;
+    final results = await db.query('configuracion_negocio');
+    final Map<String, String> map = {};
+    for (final r in results) {
+      map[r['key'] as String] = r['value'] as String;
+    }
+    return map;
   }
 
   Future<void> close() async {

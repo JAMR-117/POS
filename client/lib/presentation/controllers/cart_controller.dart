@@ -3,20 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/sales_repository.dart';
 
-/// Representa una venta aparcada / en espera
-class HeldSale {
-  final String id;
-  final List<SaleDetailItem> items;
-  final DateTime heldAt;
-
-  HeldSale({
-    required this.id,
-    required this.items,
-    required this.heldAt,
-  });
-}
-
-/// Gestor reactivo de estado para el punto de cobro (Fase 2: Core UI)
+/// Gestor reactivo de estado para el punto de cobro (POS Especializado en Cerrajería)
 class CartController extends ChangeNotifier {
   final SalesRepository _salesRepository;
 
@@ -28,111 +15,150 @@ class CartController extends ChangeNotifier {
   // ---------------------------------------------------------------------------
   final List<SaleDetailItem> _items = [];
   final List<HeldSale> _heldSales = [];
+  final Map<String, Product> _productCache = {};
+
   bool _isLoading = false;
   String? _errorMessage;
 
-  // Getters reactivos inmutables
+  String _selectedClientId = 'PUBLICO-GRAL';
+  String _selectedClientName = 'Público en General';
+  String _selectedClientTier = 'Público'; // 'Público', 'Cerrajero', 'Taller'
+
+  SalesRepository get salesRepository => _salesRepository;
+
+  // Getters reactivos
   List<SaleDetailItem> get items => List.unmodifiable(_items);
   List<HeldSale> get heldSales => List.unmodifiable(_heldSales);
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isEmpty => _items.isEmpty;
+  String get selectedClientId => _selectedClientId;
+  String get selectedClientName => _selectedClientName;
+  String get selectedClientTier => _selectedClientTier;
+  int get heldSalesCount => _heldSales.length;
+
+  void setClient(String id, String name, {String tier = 'Público'}) {
+    _selectedClientId = id;
+    _selectedClientName = name;
+    _selectedClientTier = tier;
+    notifyListeners();
+  }
 
   // ---------------------------------------------------------------------------
   // CÁLCULOS AUTOMÁTICOS EN TIEMPO REAL (LATENCIA CERO)
   // ---------------------------------------------------------------------------
 
-  /// Suma bruta de todas las líneas: (cantidad * precio_historico)
   double get subtotal => _items.fold(
         0.0,
         (acc, item) => acc + (item.cantidad * item.precioHistorico),
       );
 
-  /// Suma consolidada de descuentos aplicados a nivel de partida
   double get descuentoTotal => _items.fold(
         0.0,
         (acc, item) => acc + item.descuentoLinea,
       );
 
-  /// Total neto directo a pagar
   double get total => _items.fold(
         0.0,
         (acc, item) => acc + item.totalLinea,
       );
 
-  /// Impuestos estimados incluidos o desglosados en el total
-  /// Nota: Si se requiere base imponible exacta por tasa, se computa por item.
   double get impuestosTotal => 0.0;
+
+  // ---------------------------------------------------------------------------
+  // LÓGICA DE PRECIOS MULTI-NIVEL Y MAYOREO
+  // ---------------------------------------------------------------------------
+
+  double _determineApplicablePrice(Product product, double currentQuantity, {String? targetTier}) {
+    final tier = targetTier ?? _selectedClientTier;
+
+    // Si alcanza mayoreo por volumen
+    if (product.hasWholesalePrice && currentQuantity >= product.cantidadMayoreo!) {
+      return product.precioMayoreo!;
+    }
+
+    if (tier == 'Cerrajero' && product.precioCerrajero != null && product.precioCerrajero! > 0) {
+      return product.precioCerrajero!;
+    }
+
+    if (tier == 'Taller' && product.precioTaller != null && product.precioTaller! > 0) {
+      return product.precioTaller!;
+    }
+
+    return product.precioVenta;
+  }
+
+  String _determineApplicableTierLabel(Product product, double currentQuantity, {String? targetTier}) {
+    final tier = targetTier ?? _selectedClientTier;
+
+    if (product.hasWholesalePrice && currentQuantity >= product.cantidadMayoreo!) {
+      return 'Mayoreo';
+    }
+    if (tier == 'Cerrajero' && product.precioCerrajero != null && product.precioCerrajero! > 0) {
+      return 'Cerrajero';
+    }
+    if (tier == 'Taller' && product.precioTaller != null && product.precioTaller! > 0) {
+      return 'Taller';
+    }
+    return 'Público';
+  }
 
   // ---------------------------------------------------------------------------
   // MUTACIONES DEL TICKET ACTIVO
   // ---------------------------------------------------------------------------
 
-  /// Agrega un producto al carrito.
-  /// Si existe y no es a granel, incrementa cantidad en 1.
-  /// Si es a granel, acumula la cantidad decimal especificada.
-
-
-  /// Lógica central para calcular el precio dinámico basado en la cantidad
-  double _determineApplicablePrice(Product product, double currentQuantity) {
-    if (product.cantidadMayoreo != null && 
-        product.precioMayoreo != null && 
-        product.cantidadMayoreo! > 0 && 
-        currentQuantity >= product.cantidadMayoreo!) {
-      return product.precioMayoreo!;
-    }
-    return product.precioVenta;
-  }
-
-  /// Agrega un producto al carrito evaluando automáticamente reglas de Mayoreo.
-  void addProduct(Product product, {double quantity = 1.0}) {
+  void addProduct(Product product, {double quantity = 1.0, String? preferredTier}) {
     if (quantity <= 0) return;
+
+    _productCache[product.id] = product;
 
     final existingIndex = _items.indexWhere((item) => item.productoId == product.id);
 
     if (existingIndex != -1) {
       final current = _items[existingIndex];
-      final double newQuantity = product.esAGranel 
-          ? (current.cantidad + quantity) 
+      final double newQuantity = (product.esAGranel || product.esServicio)
+          ? (current.cantidad + quantity)
           : (current.cantidad + 1.0);
 
-      // Reevaluación de precio por volumen (Mayoreo)
-      final double applicablePrice = _determineApplicablePrice(product, newQuantity);
-
+      final String tierLabel = preferredTier ?? current.etiquetaPrecio;
+      final double applicablePrice = _determineApplicablePrice(product, newQuantity, targetTier: tierLabel);
       final double newTotal = _calculateLineTotal(
-        newQuantity, 
-        applicablePrice, 
+        newQuantity,
+        applicablePrice,
         current.descuentoLinea,
       );
 
-      _items[existingIndex] = SaleDetailItem(
-        id: current.id,
-        productoId: current.productoId,
-        descripcion: current.descripcion,
+      _items[existingIndex] = current.copyWith(
         cantidad: _roundToDecimals(newQuantity, 3),
-        precioHistorico: applicablePrice, // Se actualiza si cruzó el umbral
-        costoHistorico: current.costoHistorico,
-        descuentoLinea: current.descuentoLinea,
+        precioHistorico: applicablePrice,
         totalLinea: _roundToDecimals(newTotal, 2),
+        etiquetaPrecio: _determineApplicableTierLabel(product, newQuantity, targetTier: tierLabel),
+        stockDisponible: product.stockActual,
       );
     } else {
-      final double applicablePrice = _determineApplicablePrice(product, quantity);
-      final double totalLinea = _calculateLineTotal(
-        quantity, 
-        applicablePrice, 
-        0.0,
-      );
+      final String tierLabel = preferredTier ?? _selectedClientTier;
+      final double applicablePrice = _determineApplicablePrice(product, quantity, targetTier: tierLabel);
+      final double totalLinea = _calculateLineTotal(quantity, applicablePrice, 0.0);
 
       _items.add(
         SaleDetailItem(
           id: _generateLocalUUID(),
           productoId: product.id,
+          nombre: product.nombre,
           descripcion: product.descripcion,
           cantidad: _roundToDecimals(quantity, 3),
           precioHistorico: applicablePrice,
           costoHistorico: product.precioCompra,
           descuentoLinea: 0.0,
           totalLinea: _roundToDecimals(totalLinea, 2),
+          ubicacion: product.ubicacion,
+          sku: product.sku,
+          marca: product.marca,
+          esServicio: product.esServicio,
+          insumoVinculadoId: product.insumoVinculadoId,
+          cantidadInsumo: product.cantidadInsumo,
+          etiquetaPrecio: _determineApplicableTierLabel(product, quantity, targetTier: tierLabel),
+          stockDisponible: product.stockActual,
         ),
       );
     }
@@ -141,22 +167,24 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
-    // --------------------------------------------------------
-  // DATOS DEL CLIENTE ACTIVO (Asignación en Caja)
-  // --------------------------------------------------------
-  String _selectedClientId = 'PUBLICO-GRAL';
-  String _selectedClientName = 'Público en General';
+  /// Cambia el nivel de precio de una partida específica (Público, Cerrajero, Taller, Mayoreo, Manual)
+  void changeItemPriceTier(String detailItemId, double newPrice, String tierLabel) {
+    final index = _items.indexWhere((item) => item.id == detailItemId);
+    if (index == -1 || newPrice < 0) return;
 
-  String get selectedClientId => _selectedClientId;
-  String get selectedClientName => _selectedClientName;
+    final current = _items[index];
+    final double totalLinea = _calculateLineTotal(current.cantidad, newPrice, current.descuentoLinea);
 
-  void setClient(String id, String name) {
-    _selectedClientId = id;
-    _selectedClientName = name;
+    _items[index] = current.copyWith(
+      precioHistorico: newPrice,
+      etiquetaPrecio: tierLabel,
+      totalLinea: _roundToDecimals(totalLinea, 2),
+    );
+
     notifyListeners();
   }
 
-  /// Actualiza la cantidad y recalcula la regla de mayoreo
+  /// Actualiza la cantidad exacta y recalcula mayoreo
   void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
       removeItem(detailItemId);
@@ -167,53 +195,86 @@ class CartController extends ChangeNotifier {
     if (index == -1) return;
 
     final current = _items[index];
-    
-    // Si se pasa la referencia original del producto, reevalúa el mayoreo
+    final prod = referenceProduct ?? _productCache[current.productoId];
+
     double applicablePrice = current.precioHistorico;
-    if (referenceProduct != null) {
-       applicablePrice = _determineApplicablePrice(referenceProduct, newQuantity);
+    String tierLabel = current.etiquetaPrecio;
+
+    if (prod != null && current.etiquetaPrecio != 'Manual') {
+      applicablePrice = _determineApplicablePrice(prod, newQuantity, targetTier: current.etiquetaPrecio);
+      tierLabel = _determineApplicableTierLabel(prod, newQuantity, targetTier: current.etiquetaPrecio);
     }
 
     final double totalLinea = _calculateLineTotal(
-      newQuantity, 
-      applicablePrice, 
+      newQuantity,
+      applicablePrice,
       current.descuentoLinea,
     );
 
-    _items[index] = SaleDetailItem(
-      id: current.id,
-      productoId: current.productoId,
-      descripcion: current.descripcion,
+    _items[index] = current.copyWith(
       cantidad: _roundToDecimals(newQuantity, 3),
       precioHistorico: applicablePrice,
-      costoHistorico: current.costoHistorico,
-      descuentoLinea: current.descuentoLinea,
+      etiquetaPrecio: tierLabel,
       totalLinea: _roundToDecimals(totalLinea, 2),
     );
 
     notifyListeners();
   }
 
-  /// Agrega un artículo rápido que no existe en el catálogo
+  void incrementQuantity(String detailItemId, {Product? referenceProduct}) {
+    final index = _items.indexWhere((item) => item.id == detailItemId);
+    if (index == -1) return;
+    updateQuantity(detailItemId, _items[index].cantidad + 1.0, referenceProduct: referenceProduct);
+  }
+
+  void decrementQuantity(String detailItemId, {Product? referenceProduct}) {
+    final index = _items.indexWhere((item) => item.id == detailItemId);
+    if (index == -1) return;
+    final currentQty = _items[index].cantidad;
+    if (currentQty <= 1.0) {
+      removeItem(detailItemId);
+    } else {
+      updateQuantity(detailItemId, currentQty - 1.0, referenceProduct: referenceProduct);
+    }
+  }
+
+  void incrementLastItem() {
+    if (_items.isNotEmpty) {
+      incrementQuantity(_items.last.id);
+    }
+  }
+
+  void decrementLastItem() {
+    if (_items.isNotEmpty) {
+      decrementQuantity(_items.last.id);
+    }
+  }
+
   void addCommonArticle(double amount, {String description = 'Artículo Común'}) {
     if (amount <= 0) return;
-    
+
+    final desc = description.trim().isEmpty ? 'Artículo Común' : description.trim();
     _items.add(
       SaleDetailItem(
         id: _generateLocalUUID(),
-        productoId: 'ART-COMUN', // ID reservado para no afectar inventario
-        descripcion: description.isEmpty ? 'Artículo Común' : description,
+        productoId: 'ART-COMUN',
+        nombre: desc,
+        descripcion: desc,
         cantidad: 1.0,
         precioHistorico: amount,
         costoHistorico: 0.0,
         descuentoLinea: 0.0,
         totalLinea: _roundToDecimals(amount, 2),
+        ubicacion: 'Caja',
+        sku: 'ART-COMUN',
+        marca: 'Genérica',
+        etiquetaPrecio: 'Manual',
+        stockDisponible: 9999.0,
       ),
     );
     notifyListeners();
   }
 
-  /// Aplica un descuento en moneda fija a una partida específica
   void applyLineDiscount(String detailItemId, double discountAmount) {
     final index = _items.indexWhere((item) => item.id == detailItemId);
     if (index == -1) return;
@@ -223,18 +284,12 @@ class CartController extends ChangeNotifier {
     final double safeDiscount = discountAmount.clamp(0.0, maxDiscount);
 
     final double totalLinea = _calculateLineTotal(
-      current.cantidad, 
-      current.precioHistorico, 
+      current.cantidad,
+      current.precioHistorico,
       safeDiscount,
     );
 
-    _items[index] = SaleDetailItem(
-      id: current.id,
-      productoId: current.productoId,
-      descripcion: current.descripcion,
-      cantidad: current.cantidad,
-      precioHistorico: current.precioHistorico,
-      costoHistorico: current.costoHistorico,
+    _items[index] = current.copyWith(
       descuentoLinea: _roundToDecimals(safeDiscount, 2),
       totalLinea: _roundToDecimals(totalLinea, 2),
     );
@@ -242,17 +297,16 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Elimina una línea individual del carrito
   void removeItem(String detailItemId) {
     _items.removeWhere((item) => item.id == detailItemId);
     notifyListeners();
   }
 
-  /// Limpia todo el ticket activo en milisegundos
-void clearCart() {
+  void clearCart() {
     _items.clear();
-    _selectedClientId = 'PUBLICO-GRAL';    
-    _selectedClientName = 'Público en General'; 
+    _selectedClientId = 'PUBLICO-GRAL';
+    _selectedClientName = 'Público en General';
+    _selectedClientTier = 'Público';
     _clearError();
     notifyListeners();
   }
@@ -261,16 +315,12 @@ void clearCart() {
   // INTEGRACIÓN CON REPOSITORIO LOCAL (ESCANEO Y CHECKOUT)
   // ---------------------------------------------------------------------------
 
-  /// Escanea o busca un producto.
-  /// 1. Intenta coincidencia exacta por código/SKU. Si lo halla, lo añade directo.
-  /// 2. Si no, busca de forma incremental por descripción y retorna la lista.
   Future<List<Product>> scanOrSearchProduct(String input, {double defaultWeight = 1.0}) async {
     final cleanInput = input.trim();
     if (cleanInput.isEmpty) return [];
 
     _setLoading(true);
     try {
-      // Intento 1: Coincidencia exacta indexada (lector de barras / SKU)
       final exactMatch = await _salesRepository.findProductByBarcodeOrSku(cleanInput);
       if (exactMatch != null) {
         addProduct(exactMatch, quantity: defaultWeight);
@@ -278,8 +328,7 @@ void clearCart() {
         return [exactMatch];
       }
 
-      // Intento 2: Búsqueda incremental por descripción
-      final matches = await _salesRepository.searchProductsByDescription(cleanInput);
+      final matches = await _salesRepository.searchProductsAdvanced(cleanInput);
       _setLoading(false);
       return matches;
     } catch (e) {
@@ -289,28 +338,26 @@ void clearCart() {
     }
   }
 
-
-
-  /// Valida pagos, registra la venta en SQLite atómicamente y limpia el estado
   Future<double> checkout({
     required List<PaymentMethodBreakdown> pagos,
     required String corteCajaId,
     String? folioTicket,
+    double? totalRecibidoEfectivo,
   }) async {
     if (_items.isEmpty) {
       throw Exception('El carrito está vacío');
     }
 
     final double totalVenta = total;
-    final double totalPagado = pagos.fold(0.0, (acc, p) => acc + p.monto);
+    final double totalPagado = totalRecibidoEfectivo != null
+        ? (pagos.where((p) => p.metodo != 'efectivo').fold(0.0, (acc, p) => acc + p.monto) + totalRecibidoEfectivo)
+        : pagos.fold(0.0, (acc, p) => acc + p.monto);
 
-    // Validación de suficiencia financiera
     if (_roundToDecimals(totalPagado, 2) < _roundToDecimals(totalVenta, 2)) {
       final faltante = _roundToDecimals(totalVenta - totalPagado, 2);
       throw Exception('Pago insuficiente. Monto faltante: $faltante');
     }
 
-    // Cálculo de cambio (asociado a partidas en efectivo)
     final double cambio = _roundToDecimals(totalPagado - totalVenta, 2);
 
     _setLoading(true);
@@ -328,10 +375,8 @@ void clearCart() {
         fechaVenta: DateTime.now().toUtc(),
       );
 
-      // Ejecución de la transacción ACID en SQLite + Outbox Pattern
       await _salesRepository.processSaleTransaction(request);
 
-      // Limpieza instantánea para el siguiente cliente
       _items.clear();
       _clearError();
       _setLoading(false);
@@ -346,18 +391,24 @@ void clearCart() {
   }
 
   // ---------------------------------------------------------------------------
-  // MANEJO DE VENTAS EN ESPERA (HOLD / RESUME)
+  // MANEJO DE VENTAS EN ESPERA (HOLD / RESUME) CON ALIAS PERSONALIZADO
   // ---------------------------------------------------------------------------
 
-  /// Suspende el ticket activo actual y deja la caja limpia
-  bool holdCurrentSale() {
+  bool holdCurrentSale({String? alias}) {
     if (_items.isEmpty) return false;
+
+    final now = DateTime.now();
+    final timeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    final customAlias = (alias != null && alias.trim().isNotEmpty)
+        ? alias.trim()
+        : 'Ticket #${_heldSales.length + 1} ($timeStr)';
 
     _heldSales.add(
       HeldSale(
         id: _generateLocalUUID(),
+        alias: customAlias,
         items: List.from(_items),
-        heldAt: DateTime.now(),
+        heldAt: now,
       ),
     );
 
@@ -367,11 +418,9 @@ void clearCart() {
     return true;
   }
 
-  /// Restaura una venta en espera sustituyendo o agregando al ticket actual
   bool resumeSale(int index) {
     if (index < 0 || index >= _heldSales.length) return false;
 
-    // Si hay artículos actuales en pantalla, no se sobreescriben accidentalmente
     if (_items.isNotEmpty) {
       holdCurrentSale();
     }
@@ -383,7 +432,6 @@ void clearCart() {
     return true;
   }
 
-  /// Cancela o descarta un ticket en espera
   void discardHeldSale(int index) {
     if (index >= 0 && index < _heldSales.length) {
       _heldSales.removeAt(index);
@@ -392,7 +440,7 @@ void clearCart() {
   }
 
   // ---------------------------------------------------------------------------
-  // UTILIDADES PRIVADAS DE ALTO RENDIMIENTO
+  // UTILIDADES PRIVADAS
   // ---------------------------------------------------------------------------
 
   double _calculateLineTotal(double qty, double price, double discount) {

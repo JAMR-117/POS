@@ -103,6 +103,7 @@ class _CheckoutDialogState extends State<CheckoutDialog> {
       final cambioEntregado = await widget.cartController.checkout(
         pagos: pagos,
         corteCajaId: widget.corteCajaId,
+        totalRecibidoEfectivo: _cashPaid > 0 ? _cashPaid : null,
       );
 
       if (mounted) {

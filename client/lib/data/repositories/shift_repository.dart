@@ -63,7 +63,11 @@ class ShiftSummary {
   final double ventasTransferencia;
   final double totalVentas;
   final int totalTickets;
-  final double totalEfectivoEsperado; // Fondo inicial + Ventas Efectivo - Retiros
+  final double totalEfectivoEsperado; // Fondo inicial + Ventas Efectivo + Entradas - Salidas
+  final double entradasEfectivo;
+  final double salidasEfectivo;
+  final double gananciaEstimada;
+  final Map<String, double> ventasPorDepartamento;
 
   const ShiftSummary({
     required this.shiftId,
@@ -74,6 +78,10 @@ class ShiftSummary {
     required this.totalVentas,
     required this.totalTickets,
     required this.totalEfectivoEsperado,
+    this.entradasEfectivo = 0.0,
+    this.salidasEfectivo = 0.0,
+    this.gananciaEstimada = 0.0,
+    this.ventasPorDepartamento = const {},
   });
 }
 
@@ -191,11 +199,11 @@ class ShiftRepository {
 
     final shift = ShiftRecord.fromMap(shiftRows.first);
 
-    // Consulta de todas las ventas del corte
+    // Consulta de todas las ventas no canceladas del corte
     final salesRows = await db.query(
       'ventas',
       columns: ['total', 'pagos_desglose'],
-      where: 'corte_caja_id = ?',
+      where: "corte_caja_id = ? AND estatus != 'cancelado'",
       whereArgs: [shiftId],
     );
 
@@ -223,62 +231,49 @@ class ShiftRepository {
       }
     }
 
-    final esperadoEnCaja = shift.montoInicial + sumEfectivo - shift.montoRetiros;
+    // Movimientos de entrada / salida de caja
+    final movRows = await db.query(
+      'movimientos_caja',
+      where: 'corte_caja_id = ?',
+      whereArgs: [shiftId],
+    );
+    double entradas = 0.0;
+    double salidas = 0.0;
+    for (final m in movRows) {
+      final tipo = m['tipo'] as String;
+      final monto = (m['monto'] as num).toDouble();
+      if (tipo == 'entrada') {
+        entradas += monto;
+      } else {
+        salidas += monto;
+      }
+    }
 
-    /// Registra una entrada o salida de efectivo, actualiza el corte y genera el evento Outbox
-  /// Registra una entrada o salida de efectivo, ajustando el saldo del turno activo
-  Future<void> registerCashMovement({
-    required String shiftId,
-    required String tipo, // 'entrada' o 'salida'
-    required double monto,
-    required String concepto,
-  }) async {
-    final db = await _dbHelper.database;
-    final id = _generateUUID();
-    final isoNow = DateTime.now().toUtc().toIso8601String();
+    // Desglose de ventas por departamento y cálculo de costo/ganancia
+    final deptoRows = await db.rawQuery('''
+      SELECT COALESCE(p.departamento, 'General') as depto,
+             SUM(dv.total_linea) as total_depto,
+             SUM(dv.cantidad * dv.costo_historico) as costo_depto
+      FROM detalles_venta dv
+      JOIN productos p ON dv.producto_id = p.id
+      JOIN ventas v ON dv.venta_id = v.id
+      WHERE v.corte_caja_id = ? AND v.estatus != 'cancelado'
+      GROUP BY p.departamento
+    ''', [shiftId]);
 
-    await db.transaction((txn) async {
-      // 1. Historial del movimiento
-      await txn.insert('movimientos_caja', {
-        'id': id,
-        'corte_caja_id': shiftId,
-        'tipo': tipo,
-        'monto': monto,
-        'concepto': concepto,
-        'fecha': isoNow,
-        'created_at': isoNow,
-      });
+    final Map<String, double> deptoMap = {};
+    double totalCostos = 0.0;
+    for (final r in deptoRows) {
+      final String d = r['depto'] as String;
+      final double totalD = (r['total_depto'] as num?)?.toDouble() ?? 0.0;
+      final double costoD = (r['costo_depto'] as num?)?.toDouble() ?? 0.0;
+      deptoMap[d] = _roundTo2(totalD);
+      totalCostos += costoD;
+    }
 
-      // 2. Ajuste del acumulador en cortes_caja
-      // Si es salida (retiro), suma a monto_retiros. Si es entrada (fondo extra), resta a monto_retiros.
-      final modifier = tipo == 'salida' ? monto : -monto;
-      final updated = await txn.rawUpdate(
-        'UPDATE cortes_caja SET monto_retiros = monto_retiros + ? WHERE id = ?',
-        [modifier, shiftId]
-      );
-
-      if (updated == 0) throw Exception('Turno no encontrado para registrar movimiento.');
-
-      // 3. Cola de sincronización (Outbox)
-      final payload = jsonEncode({
-        'movimiento_id': id,
-        'corte_caja_id': shiftId,
-        'tipo': tipo,
-        'monto': monto,
-        'concepto': concepto,
-        'fecha': isoNow,
-      });
-
-      await txn.insert('sync_queue', {
-        'id': id,
-        'event_type': 'MOVIMIENTO_CAJA',
-        'payload': payload,
-        'sync_status': 'pending',
-        'retry_count': 0,
-        'created_at': isoNow,
-      });
-    });
-  }
+    final double ganancia = _roundTo2(sumTotal - totalCostos);
+    final double retirosTotales = shift.montoRetiros > 0 ? shift.montoRetiros : salidas;
+    final double esperadoEnCaja = shift.montoInicial + sumEfectivo + entradas - retirosTotales;
 
     return ShiftSummary(
       shiftId: shiftId,
@@ -289,6 +284,10 @@ class ShiftRepository {
       totalVentas: _roundTo2(sumTotal),
       totalTickets: salesRows.length,
       totalEfectivoEsperado: _roundTo2(esperadoEnCaja),
+      entradasEfectivo: _roundTo2(entradas),
+      salidasEfectivo: _roundTo2(retirosTotales),
+      gananciaEstimada: ganancia,
+      ventasPorDepartamento: deptoMap,
     );
   }
 

@@ -1,13 +1,24 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../data/hardware/esc_pos_ticket_builder.dart';
+import '../../data/hardware/printer_service.dart';
+import '../../data/local/models.dart';
 import '../../data/repositories/sales_repository.dart';
 import '../controllers/auth_controller.dart';
 import '../widgets/admin_auth_dialog.dart';
 
 class SalesHistoryScreen extends StatefulWidget {
   final AuthController authController;
+  final PrinterService? printerService;
+  final String? activeShiftId;
 
-  const SalesHistoryScreen({super.key, required this.authController});
+  const SalesHistoryScreen({
+    super.key,
+    required this.authController,
+    this.printerService,
+    this.activeShiftId,
+  });
 
   @override
   State<SalesHistoryScreen> createState() => _SalesHistoryScreenState();
@@ -45,6 +56,197 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
     }
   }
 
+  Future<void> _reprintTicket(SaleRecord sale, List<SaleDetailItem> details) async {
+    if (widget.printerService == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Servicio de impresión no configurado.'), backgroundColor: Colors.orange),
+      );
+      return;
+    }
+
+    final ticketData = TicketPrintData(
+      negocioNombre: 'CERRAJERÍA Y ELECTRÓNICA AUTOMOTRIZ',
+      folio: '${sale.folioTicket} (COPIA REIMPRESA)',
+      fecha: sale.fechaVenta,
+      cajero: widget.authController.currentUser?.nombre ?? 'Cajero',
+      turnoId: 'HISTORIAL',
+      items: details,
+      subtotal: sale.total,
+      descuentoTotal: 0.0,
+      total: sale.total,
+      pagos: [PaymentMethodBreakdown(metodo: 'Liquidado', monto: sale.total)],
+      cambio: 0.0,
+    );
+
+    await widget.printerService!.printSaleTicketAsync(ticketData, openCashDrawer: false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Comprobante enviado a impresora térmica.'), backgroundColor: Color(0xFF2E7D32)),
+      );
+    }
+  }
+
+  Future<void> _openPartialRefundDialog(SaleRecord sale, List<SaleDetailItem> details) async {
+    final Map<String, double> refundQuantities = {};
+    for (final it in details) {
+      refundQuantities[it.id] = 0.0;
+    }
+    final motivoCtrl = TextEditingController(text: 'Cliente solicitó cambio o devolución');
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final double totalADevolver = details.fold(0.0, (acc, it) {
+            final qty = refundQuantities[it.id] ?? 0.0;
+            return acc + (qty * it.precioHistorico);
+          });
+
+          return AlertDialog(
+            title: Text('Devolución de Artículos - Folio: ${sale.folioTicket}'),
+            content: SizedBox(
+              width: 550,
+              height: 420,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Selecciona las unidades a devolver para reintegrar automáticamente a inventario:',
+                    style: TextStyle(fontSize: 12, color: Colors.black87),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: details.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, idx) {
+                        final item = details[idx];
+                        final double currentRefund = refundQuantities[item.id] ?? 0.0;
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4.0),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    Text('Comprado: ${item.cantidad} | P.U: \$${item.precioHistorico.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline),
+                                    onPressed: currentRefund > 0
+                                        ? () => setModalState(() => refundQuantities[item.id] = currentRefund - 1.0)
+                                        : null,
+                                  ),
+                                  Text(
+                                    currentRefund.toStringAsFixed(item.cantidad % 1 != 0 ? 1 : 0),
+                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.add_circle_outline),
+                                    onPressed: currentRefund < item.cantidad
+                                        ? () => setModalState(() => refundQuantities[item.id] = currentRefund + 1.0)
+                                        : null,
+                                  ),
+                                ],
+                              ),
+                              SizedBox(
+                                width: 80,
+                                child: Text(
+                                  '\$${(currentRefund * item.precioHistorico).toStringAsFixed(2)}',
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: motivoCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Motivo de la devolución *',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(4)),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Total a Reembolsar al Cliente:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text('\$${totalADevolver.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red.shade800)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
+                onPressed: totalADevolver > 0 ? () => Navigator.pop(ctx, true) : null,
+                child: const Text('Confirmar Devolución'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      final List<Map<String, dynamic>> itemsToRefund = [];
+      refundQuantities.forEach((detId, qty) {
+        if (qty > 0) {
+          itemsToRefund.add({'detalle_id': detId, 'cantidad': qty});
+        }
+      });
+
+      if (itemsToRefund.isEmpty) return;
+
+      final isAuthorized = await AdminAuthDialog.requestAdminAccess(context, widget.authController);
+      if (!isAuthorized || !mounted) return;
+
+      try {
+        await _salesRepo.refundSaleItems(
+          ventaId: sale.id,
+          itemsToRefund: itemsToRefund,
+          motivo: motivoCtrl.text.trim(),
+          usuarioId: widget.authController.currentUser?.nombre ?? 'cajero',
+          corteCajaId: widget.activeShiftId,
+        );
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Devolución procesada. Stock reintegrado al inventario con éxito.'),
+              backgroundColor: Color(0xFF2E7D32),
+            ),
+          );
+          _loadSales();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en devolución: $e'), backgroundColor: Colors.red));
+        }
+      }
+    }
+  }
+
   Future<void> _showTicketDetails(SaleRecord sale) async {
     final details = await _salesRepo.getSaleDetails(sale.id);
 
@@ -66,7 +268,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
           ],
         ),
         content: SizedBox(
-          width: 500,
+          width: 520,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -82,7 +284,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                     return ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      title: Text(item.descripcion),
+                      title: Text(item.nombre),
                       subtitle: Text('${item.cantidad} x \$${item.precioHistorico.toStringAsFixed(2)}'),
                       trailing: Text('\$${item.totalLinea.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     );
@@ -96,45 +298,24 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cerrar')),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.print),
+            label: const Text('Reimprimir Ticket'),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _reprintTicket(sale, details);
+            },
+          ),
           if (sale.estatus != 'cancelado')
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
-              icon: const Icon(Icons.cancel_presentation),
-              label: const Text('Cancelar Venta y Reintegrar Stock'),
-              onPressed: () async {
-                final isAuthorized = await AdminAuthDialog.requestAdminAccess(context, widget.authController);
-                if (!isAuthorized) return;
-
-                final confirm = await showDialog<bool>(
-                  context: ctx,
-                  builder: (confirmCtx) => AlertDialog(
-                    title: const Text('Confirmar Cancelación'),
-                    content: const Text('Esta acción revertirá el pago y regresará la mercancía al inventario local. No se puede deshacer.'),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(confirmCtx, false), child: const Text('No, volver')),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
-                        onPressed: () => Navigator.pop(confirmCtx, true), 
-                        child: const Text('Sí, Cancelar Ticket')
-                      ),
-                    ],
-                  )
-                );
-
-                if (confirm == true) {
-                  try {
-                    await _salesRepo.cancelSale(sale.id);
-                    if (mounted) {
-                      Navigator.pop(ctx);
-                      _loadSales();
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ticket cancelado exitosamente'), backgroundColor: Color(0xFF2E7D32)));
-                    }
-                  } catch (e) {
-                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
-                  }
-                }
+              icon: const Icon(Icons.undo),
+              label: const Text('Devolver Artículos'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _openPartialRefundDialog(sale, details);
               },
-            )
+            ),
         ],
       ),
     );

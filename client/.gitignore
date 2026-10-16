@@ -46,3 +46,25 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+
+
+# Flutter / Dart
+client/build/
+client/.dart_tool/
+client/.flutter-plugins*
+client/android/.gradle/
+
+# Go / Binarios
+*.exe
+bin/
+backend/pos-backend.exe
+
+# Bases de datos y archivos temporales
+*.db
+*.sqlite
+*.db-wal
+*.db-shm
+*.fdb
+*.fbk
+.env

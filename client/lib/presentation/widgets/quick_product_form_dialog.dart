@@ -2,8 +2,6 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../data/local/models.dart';
-// Asumiendo que tienes un ProductRepository para aislar la lógica de SQLite
-// Si no, puedes usar DatabaseHelper directamente.
 import '../../data/repositories/product_repository.dart';
 
 class QuickProductFormDialog extends StatefulWidget {
@@ -29,7 +27,10 @@ class QuickProductFormDialog extends StatefulWidget {
 }
 
 class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
+  final TextEditingController _nombreController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
+  final TextEditingController _marcaController = TextEditingController(text: 'Genérica');
+  final TextEditingController _ubicacionController = TextEditingController();
   final TextEditingController _precioVentaController = TextEditingController();
   final TextEditingController _precioCompraController = TextEditingController();
   
@@ -43,12 +44,13 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
   }
 
   Future<void> _handleSave() async {
+    final nombre = _nombreController.text.trim();
     final descripcion = _descController.text.trim();
     final precioVenta = double.tryParse(_precioVentaController.text) ?? 0.0;
     final precioCompra = double.tryParse(_precioCompraController.text) ?? 0.0;
 
-    if (descripcion.isEmpty || precioVenta <= 0) {
-      setState(() => _error = 'La descripción y el precio de venta son obligatorios.');
+    if (nombre.isEmpty || precioVenta <= 0) {
+      setState(() => _error = 'El nombre y el precio de venta son obligatorios.');
       return;
     }
 
@@ -62,29 +64,35 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
         id: _generateUUID(),
         codigoBarras: widget.barcode,
         sku: widget.barcode,
-        descripcion: descripcion,
+        nombre: nombre,
+        descripcion: descripcion.isNotEmpty ? descripcion : nombre,
+        marca: _marcaController.text.trim().isEmpty ? 'Genérica' : _marcaController.text.trim(),
+        ubicacion: _ubicacionController.text.trim().isEmpty ? null : _ubicacionController.text.trim(),
         precioCompra: precioCompra,
         precioVenta: precioVenta,
-        porcentajeImpuesto: 0.0,
+        porcentajeImpuesto: 0.16,
         departamento: 'General',
-        stockActual: 0.0, // Inicia en 0, el checkout lo pasará a negativo
+        stockActual: 0.0,
         esAGranel: _esAGranel,
-        // Campos de mayoreo añadidos en la Iteración 1
         cantidadMayoreo: null,
         precioMayoreo: null,
+        esServicio: false,
+        insumoVinculadoId: null,
+        cantidadInsumo: 1.0,
       );
 
-      // Persistencia local (esto debería guardar en SQLite e insertar en sync_queue)
       await widget.productRepository.saveProduct(newProduct);
       
       if (mounted) {
         Navigator.of(context).pop(newProduct);
       }
     } catch (e) {
-      setState(() {
-        _isProcessing = false;
-        _error = 'Error al guardar: $e';
-      });
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+          _error = 'Error al guardar: $e';
+        });
+      }
     }
   }
 
@@ -99,7 +107,7 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
         ],
       ),
       content: SizedBox(
-        width: 400,
+        width: 440,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -109,7 +117,7 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
                 padding: const EdgeInsets.all(8),
                 color: Colors.amber.shade50,
                 child: Text('Código escaneado: ${widget.barcode}', 
-                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber, fontSize: 13)),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 13)),
               ),
               const SizedBox(height: 12),
               if (_error != null)
@@ -118,10 +126,42 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
                   child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13)),
                 ),
               TextField(
-                controller: _descController,
+                controller: _nombreController,
                 autofocus: true,
                 textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(labelText: 'Descripción del Producto *', border: OutlineInputBorder()),
+                decoration: const InputDecoration(
+                  labelText: 'Nombre del Producto / Llave *',
+                  hintText: 'Ej. Llave Virgen R-52',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _descController,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción / Compatibilidad',
+                  hintText: 'Ej. Cerraduras Phillips mod. 715...',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _marcaController,
+                      decoration: const InputDecoration(labelText: 'Marca', border: OutlineInputBorder()),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _ubicacionController,
+                      decoration: const InputDecoration(labelText: '📍 Ubicación (Gaveta)', border: OutlineInputBorder()),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               Row(
@@ -131,7 +171,7 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
                       controller: _precioCompraController,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
-                      decoration: const InputDecoration(labelText: 'Costo (\$)', border: OutlineInputBorder()),
+                      decoration: const InputDecoration(labelText: 'Costo Compra (\$)', border: OutlineInputBorder()),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -153,7 +193,7 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
                 subtitle: const Text('Permite cobrar cantidades con decimales'),
                 value: _esAGranel,
                 onChanged: (val) => setState(() => _esAGranel = val),
-                activeColor: const Color(0xFF1F4E79),
+                activeThumbColor: const Color(0xFF1F4E79),
                 contentPadding: EdgeInsets.zero,
               ),
             ],
@@ -168,9 +208,9 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
         ElevatedButton(
           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
           onPressed: _isProcessing ? null : _handleSave,
-          child: _isProcessing 
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-              : const Text('GUARDAR Y COBRAR'),
+          child: _isProcessing
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+              : const Text('GUARDAR Y AGREGAR'),
         ),
       ],
     );

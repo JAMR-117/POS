@@ -151,7 +151,9 @@ class StockAlertsSheet extends StatelessWidget {
         break;
       case RiskLevel.alto:
         badgeColor = const Color(0xFFE65100);
-        badgeText = '${item.diasRestantes.toStringAsFixed(1)} DÍAS';
+        badgeText = (item.stockActual <= item.stockMinimo)
+            ? 'Stock: ${item.stockActual.toStringAsFixed(item.stockActual % 1 != 0 ? 1 : 0)} / Mín: ${item.stockMinimo.toStringAsFixed(0)}'
+            : '${item.diasRestantes.toStringAsFixed(1)} DÍAS';
         break;
       case RiskLevel.moderado:
       default:

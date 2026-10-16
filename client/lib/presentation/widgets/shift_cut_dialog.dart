@@ -181,25 +181,71 @@ class _ShiftCutDialogState extends State<ShiftCutDialog> with SingleTickerProvid
   }
 
   Widget _buildCorteXTab(dynamic summary) {
+    final Map<String, double> deptos = (summary.ventasPorDepartamento as Map<String, double>?) ?? {};
+
     return ListView(
       children: [
-        _buildMetricTile('Fondo Inicial de Caja:', '\$${summary.montoInicial.toStringAsFixed(2)}'),
-        const Divider(height: 12),
-        _buildMetricTile('Ventas en Efectivo:', '\$${summary.ventasEfectivo.toStringAsFixed(2)}'),
-        _buildMetricTile('Ventas con Tarjeta:', '\$${summary.ventasTarjeta.toStringAsFixed(2)}'),
-        _buildMetricTile('Ventas por Transferencia:', '\$${summary.ventasTransferencia.toStringAsFixed(2)}'),
-        const Divider(height: 12),
-        _buildMetricTile('Total de Tickets Emitidos:', '${summary.totalTickets}'),
-        _buildMetricTile('Total Ingresos por Ventas:', '\$${summary.totalVentas.toStringAsFixed(2)}', isBold: true),
-        const SizedBox(height: 14),
+        // 1. Dinero en Caja
         Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: const Color(0xFFE3F2FD), borderRadius: BorderRadius.circular(4)),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFFA5D6A7)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('DINERO EN CAJA (ARQUEO EN VIVO)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20))),
+              const SizedBox(height: 6),
+              _buildMetricTile('  • Fondo Inicial de Caja:', '\$${summary.montoInicial.toStringAsFixed(2)}'),
+              _buildMetricTile('  • (+) Ventas en Efectivo:', '\$${summary.ventasEfectivo.toStringAsFixed(2)}'),
+              _buildMetricTile('  • (+) Entradas de Efectivo:', '\$${summary.entradasEfectivo.toStringAsFixed(2)}'),
+              _buildMetricTile('  • (-) Salidas / Retiros:', '\$${summary.salidasEfectivo.toStringAsFixed(2)}'),
+              const Divider(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('EFECTIVO TOTAL EN CAJA:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF1B5E20))),
+                  Text('\$${summary.totalEfectivoEsperado.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1B5E20))),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // 2. Pagos Desglosados
+        const Text('FORMAS DE PAGO RECIBIDAS', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1F4E79))),
+        const SizedBox(height: 4),
+        _buildMetricTile('Efectivo:', '\$${summary.ventasEfectivo.toStringAsFixed(2)}'),
+        _buildMetricTile('Tarjetas (Débito/Crédito):', '\$${summary.ventasTarjeta.toStringAsFixed(2)}'),
+        _buildMetricTile('Transferencias Bancarias:', '\$${summary.ventasTransferencia.toStringAsFixed(2)}'),
+        _buildMetricTile('Total Ventas del Turno:', '\$${summary.totalVentas.toStringAsFixed(2)}', isBold: true),
+        _buildMetricTile('Tickets Emitidos:', '${summary.totalTickets}'),
+        const Divider(height: 14),
+
+        // 3. Ventas por Departamento
+        if (deptos.isNotEmpty) ...[
+          const Text('VENTAS POR DEPARTAMENTO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1F4E79))),
+          const SizedBox(height: 4),
+          ...deptos.entries.map((entry) => _buildMetricTile('${entry.key}:', '\$${entry.value.toStringAsFixed(2)}')),
+          const Divider(height: 14),
+        ],
+
+        // 4. Ganancia Estimada del Día
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFEDE7F6),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFFD1C4E9)),
+          ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('EFECTIVO TEÓRICO EN CAJÓN:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0D47A1))),
-              Text('\$${summary.totalEfectivoEsperado.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0D47A1))),
+              const Text('GANANCIA ESTIMADA DEL TURNO:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF4A148C))),
+              Text('\$${summary.gananciaEstimada.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF4A148C))),
             ],
           ),
         ),
