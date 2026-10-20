@@ -82,6 +82,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
     super.dispose();
   }
 
+  void _filterByMolde(String molde) {
+    setState(() {
+      _selectedDepartamento = 'Todos';
+      _selectedMarca = 'Todas';
+      _selectedTipo = 'todos';
+      _soloBajoStock = false;
+      _searchController.text = 'molde:$molde';
+    });
+    _loadLocalCatalog();
+  }
+
   Future<void> _loadSyncMetadata() async {
     final meta = await DatabaseHelper.instance.getMetadata('last_inventory_sync_at');
     if (mounted) {
@@ -399,10 +410,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ],
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              // Filtro por Tipo (Todos / Físico / Servicio)
-              SegmentedButton<String>(
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isNarrow = constraints.maxWidth < 1050;
+
+              final tipoSelector = SegmentedButton<String>(
                 segments: const [
                   ButtonSegment(value: 'todos', label: Text('Todos', style: TextStyle(fontSize: 12))),
                   ButtonSegment(value: 'fisicos', label: Text('📦 Físicos', style: TextStyle(fontSize: 12))),
@@ -414,57 +426,49 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   _loadLocalCatalog();
                 },
                 style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              ),
-              const SizedBox(width: 12),
+              );
 
-              // Filtro por Departamento
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedDepartamento,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Familia / Departamento',
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Color(0xFFF9FAFB),
-                  ),
-                  items: _departamentos
-                      .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 12))))
-                      .toList(),
-                  onChanged: (val) {
-                    if (val != null) {
-                      setState(() => _selectedDepartamento = val);
-                      _loadLocalCatalog();
-                    }
-                  },
+              final deptoDropdown = DropdownButtonFormField<String>(
+                initialValue: _selectedDepartamento,
+                isDense: true,
+                decoration: const InputDecoration(
+                  labelText: 'Familia / Departamento',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Color(0xFFF9FAFB),
                 ),
-              ),
-              const SizedBox(width: 12),
+                items: _departamentos
+                    .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _selectedDepartamento = val);
+                    _loadLocalCatalog();
+                  }
+                },
+              );
 
-              // Filtro por Marca
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  initialValue: _selectedMarca,
-                  isDense: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Marca / Fabricante',
-                    border: OutlineInputBorder(),
-                    filled: true,
-                    fillColor: Color(0xFFF9FAFB),
-                  ),
-                  items: _marcas
-                      .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
-                      .toList(),
-                  onChanged: (val) {
-                    if (val != null) {
-                      setState(() => _selectedMarca = val);
-                      _loadLocalCatalog();
-                    }
-                  },
+              final marcaDropdown = DropdownButtonFormField<String>(
+                initialValue: _selectedMarca,
+                isDense: true,
+                decoration: const InputDecoration(
+                  labelText: 'Marca / Fabricante',
+                  border: OutlineInputBorder(),
+                  filled: true,
+                  fillColor: Color(0xFFF9FAFB),
                 ),
-              ),
-              const SizedBox(width: 12),
-              FilterChip(
+                items: _marcas
+                    .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12))))
+                    .toList(),
+                onChanged: (val) {
+                  if (val != null) {
+                    setState(() => _selectedMarca = val);
+                    _loadLocalCatalog();
+                  }
+                },
+              );
+
+              final bajoStockChip = FilterChip(
                 avatar: const Icon(Icons.warning_amber, size: 16, color: Color(0xFFE65100)),
                 label: const Text('Bajo Mínimo (Escasez)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 selected: _soloBajoStock,
@@ -473,8 +477,42 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   setState(() => _soloBajoStock = val);
                   _loadLocalCatalog();
                 },
-              ),
-            ],
+              );
+
+              if (isNarrow) {
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        tipoSelector,
+                        const SizedBox(width: 12),
+                        bajoStockChip,
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(child: deptoDropdown),
+                        const SizedBox(width: 12),
+                        Expanded(child: marcaDropdown),
+                      ],
+                    ),
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  tipoSelector,
+                  const SizedBox(width: 12),
+                  Expanded(child: deptoDropdown),
+                  const SizedBox(width: 12),
+                  Expanded(child: marcaDropdown),
+                  const SizedBox(width: 12),
+                  bajoStockChip,
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -614,20 +652,41 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         ),
                       ),
 
-                      // Equivalencia (Molde Universal)
+                      // Equivalencia (Molde Universal) Clickeable
                       Expanded(
                         flex: 1,
                         child: prod.codigoEquivalencia != null && prod.codigoEquivalencia!.isNotEmpty
-                            ? Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.shade50,
-                                  borderRadius: BorderRadius.circular(3),
-                                  border: Border.all(color: Colors.blue.shade200),
-                                ),
-                                child: Text(
-                                  prod.codigoEquivalencia!,
-                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                            ? Tooltip(
+                                message: 'Clic para filtrar todas las llaves del Molde: ${prod.codigoEquivalencia}',
+                                child: Material(
+                                  color: Colors.transparent,
+                                  child: InkWell(
+                                    onTap: () => _filterByMolde(prod.codigoEquivalencia!),
+                                    borderRadius: BorderRadius.circular(4),
+                                    hoverColor: Colors.blue.shade100,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.shade50,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: Colors.blue.shade400),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.link, size: 12, color: Color(0xFF0D47A1)),
+                                          const SizedBox(width: 3),
+                                          Flexible(
+                                            child: Text(
+                                              prod.codigoEquivalencia!,
+                                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               )
                             : const Text('-', style: TextStyle(fontSize: 12, color: Colors.grey)),

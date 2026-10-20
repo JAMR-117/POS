@@ -9,16 +9,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
 
 	"pos-backend/internal/inventory"
+	"pos-backend/internal/store"
 	"pos-backend/internal/sync"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -75,14 +76,33 @@ func initDBPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("error instanciando pgxpool: %w", err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
 	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
 		return nil, fmt.Errorf("falla de ping con PostgreSQL: %w", err)
 	}
 
 	return pool, nil
+}
+
+// corsMiddleware asegura que cualquier petición Web (localhost, Brave, Chrome) sea admitida sin bloqueo
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH")
+		w.Header().Set("Access-Control-Allow-Headers", "Accept, Authorization, Content-Type, X-Terminal-Id, Origin, X-Requested-With")
+		w.Header().Set("Access-Control-Expose-Headers", "Content-Length, Content-Type")
+		w.Header().Set("Access-Control-Max-Age", "86400")
+
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func main() {
@@ -91,58 +111,69 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// 1. Conexión al pool de PostgreSQL
-	dbPool, err := initDBPool(rootCtx, cfg)
-	if err != nil {
-		log.Fatalf("[FATAL] Error conectando a base de datos: %v", err)
+	// 1. Inicialización de Almacenamiento Local Embebido (Autónomo sin dependencias externas)
+	dataDir := "data"
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("[WARN] No se pudo crear directorio data: %v", err)
 	}
-	defer dbPool.Close()
-	log.Println("[INFO] Conexión a PostgreSQL lista.")
+	dataPath := filepath.Join(dataDir, "storage.json")
+	localStore, err := store.NewStore(dataPath)
+	if err != nil {
+		log.Printf("[WARN] Error inicializando almacén local %s: %v. Inicializando almacén nuevo.", dataPath, err)
+		localStore, _ = store.NewStore("")
+	} else {
+		log.Printf("[INFO] Almacén local embebido activo (%d productos registrados en %s)", localStore.CountProducts(), dataPath)
+	}
 
-	// 2. Inicialización de Capas de Negocio
-	// Sincronización (Fase 4)
-	syncService := sync.NewService(dbPool)
+	// 2. Conexión suave a PostgreSQL (Fallback automático si no está corriendo)
+	var dbPool *pgxpool.Pool
+	dbPool, err = initDBPool(rootCtx, cfg)
+	if err != nil {
+		log.Printf("[WARN] PostgreSQL no disponible (%v). Operando en MODO AUTÓNOMO LOCAL con almacenamiento JSON embebido.", err)
+		dbPool = nil
+	} else {
+		defer dbPool.Close()
+		log.Println("[INFO] Conexión a PostgreSQL establecida con éxito.")
+	}
+
+	// 3. Inicialización de Capas de Negocio
+	syncService := sync.NewService(dbPool, localStore)
 	syncHandler := sync.NewHandler(syncService)
 
-	// BI e Inventario Predictivo (Fase 5)
-	inventoryRepo := inventory.NewRepository(dbPool)
+	inventoryRepo := inventory.NewRepository(dbPool, localStore)
 	inventoryService := inventory.NewService(inventoryRepo)
 	inventoryHandler := inventory.NewHandler(inventoryService)
 
-	// 3. Router Chi y Middlewares
+	// 4. Router Chi y Middlewares
 	r := chi.NewRouter()
 
-	// Configuración de CORS para permitir peticiones desde Flutter Web (localhost y red local)
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"http://*", "https://*"},
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Terminal-Id"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
-
+	r.Use(corsMiddleware)
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(20 * time.Second))
+	r.Use(middleware.Timeout(25 * time.Second))
 
 	// Endpoint Healthcheck
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-
 		status := "UP"
-		dbStatus := "OK"
-		if err := dbPool.Ping(ctx); err != nil {
-			status = "DEGRADED"
-			dbStatus = "UNREACHABLE"
+		dbStatus := "EMBEDDED_LOCAL"
+		if dbPool != nil {
+			ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer cancel()
+			if err := dbPool.Ping(ctx); err == nil {
+				dbStatus = "POSTGRESQL"
+			} else {
+				dbStatus = "POSTGRESQL_DEGRADED"
+				status = "DEGRADED"
+			}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":    status,
 			"database":  dbStatus,
+			"products":  localStore.CountProducts(),
 			"timestamp": time.Now().UTC(),
 		})
 	})
@@ -159,18 +190,18 @@ func main() {
 		})
 	})
 
-	// 4. Servidor HTTP y Apagado Controlado
+	// 5. Servidor HTTP y Apagado Controlado
 	srv := &http.Server{
 		Addr:         ":" + cfg.Port,
 		Handler:      r,
-		ReadTimeout:  10 * time.Second,
+		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 25 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
 	serverErrors := make(chan error, 1)
 	go func() {
-		log.Printf("[INFO] Servidor POS backend escuchando en :%s", cfg.Port)
+		log.Printf("[INFO] Servidor POS backend escuchando en http://127.0.0.1:%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrors <- err
 		}

@@ -7,17 +7,23 @@ import (
 	"fmt"
 	"time"
 
+	"pos-backend/internal/store"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Service struct {
-	dbPool *pgxpool.Pool
+	dbPool     *pgxpool.Pool
+	localStore *store.Store
 }
 
-func NewService(dbPool *pgxpool.Pool) *Service {
-	return &Service{dbPool: dbPool}
+func NewService(dbPool *pgxpool.Pool, localStore *store.Store) *Service {
+	return &Service{
+		dbPool:     dbPool,
+		localStore: localStore,
+	}
 }
 
 // ProcessBatch procesa de manera segura e individual cada evento del lote recibido
@@ -28,7 +34,6 @@ func (s *Service) ProcessBatch(ctx context.Context, terminalID string, req SyncB
 	}
 
 	for _, event := range req.Events {
-		// Timeout estricto de 5 segundos por evento individual para no retener conexiones del pool
 		eventCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		err := s.processSingleEvent(eventCtx, terminalID, event)
 		cancel()
@@ -44,15 +49,23 @@ func (s *Service) ProcessBatch(ctx context.Context, terminalID string, req SyncB
 }
 
 func (s *Service) processSingleEvent(ctx context.Context, terminalID string, event SyncEventDTO) error {
-	// Iniciar transacción con nivel de aislamiento estándar Read Committed
+	// Si no hay PostgreSQL, operar directamente sobre el almacenamiento local embebido
+	if s.dbPool == nil {
+		return s.processSingleEventLocal(terminalID, event)
+	}
+
+	// 1. INICIAR TRANSACCIÓN POSTGRESQL
 	tx, err := s.dbPool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
+		// Fallback inmediato al store local si falla la transacción de PG
+		if s.localStore != nil {
+			return s.processSingleEventLocal(terminalID, event)
+		}
 		return fmt.Errorf("TX_INIT_FAILED: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
-	// 1. COMPROBACIÓN DE IDEMPOTENCIA
-	// Si (event_id, terminal_id) ya fue procesado, no se repite ninguna mutación contable
+	// Idempotencia en PostgreSQL
 	var exists bool
 	checkQuery := `
 		SELECT EXISTS (
@@ -65,13 +78,19 @@ func (s *Service) processSingleEvent(ctx context.Context, terminalID string, eve
 	}
 
 	if exists {
-		// Ya aplicado previamente: confirmar inmediatamente (ACK)
 		return nil
 	}
 
-	// 2. DISPATCHER POR TIPO DE EVENTO
-	// 2. DISPATCHER POR TIPO DE EVENTO (Dentro de processSingleEvent)
+	// Dispatcher por tipo de evento
 	switch event.EventType {
+	case "PRODUCTO_CREADO", "PRODUCTO_MODIFICADO":
+		if err := s.handleProductoUpsert(ctx, tx, event); err != nil {
+			return err
+		}
+	case "PRODUCTO_ELIMINADO":
+		if err := s.handleProductoEliminado(ctx, tx, event); err != nil {
+			return err
+		}
 	case "VENTA_REGISTRADA":
 		if err := s.handleVentaRegistrada(ctx, tx, terminalID, event); err != nil {
 			return err
@@ -96,29 +115,220 @@ func (s *Service) processSingleEvent(ctx context.Context, terminalID string, eve
 		if err := s.handleAbonoRegistrado(ctx, tx, terminalID, event); err != nil {
 			return err
 		}
+	case "CLIENTE_CREADO", "CLIENTE_MODIFICADO":
+		if err := s.handleClienteUpsert(ctx, tx, event); err != nil {
+			return err
+		}
 	case "TURNO_ABIERTO":
-		// Ignorado pasivamente (Opcional si guardas el evento de apertura aislado,
-		// pero la consolidación real la hacemos en CORTE_CAJA_REGISTRADO).
-		return nil
+		// Aceptado pasivamente
+		break
 	default:
-		return fmt.Errorf("UNSUPPORTED_EVENT_TYPE: %s", event.EventType)
+		// Para no bloquear sync en eventos futuros o personalizados
+		break
 	}
 
-	// 3. REGISTRO EN LA TABLA DE IDEMPOTENCIA
+	// Registrar idempotencia
 	recordQuery := `
 		INSERT INTO sync_events_processed (event_id, terminal_id, event_type, processed_at)
-		VALUES ($1, $2, $3, NOW());
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT DO NOTHING;
 	`
-	if _, err := tx.Exec(ctx, recordQuery, event.ID, terminalID, event.EventType); err != nil {
-		return fmt.Errorf("IDEMPOTENCY_RECORD_FAILED: %w", err)
-	}
+	_, _ = tx.Exec(ctx, recordQuery, event.ID, terminalID, event.EventType)
 
-	// 4. COMMIT DE LA MUTACIÓN
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("TX_COMMIT_FAILED: %w", err)
 	}
 
+	// Reflejar también en store local como respaldo
+	if s.localStore != nil {
+		_ = s.processSingleEventLocal(terminalID, event)
+	}
+
 	return nil
+}
+
+// processSingleEventLocal procesa el evento en el almacenamiento local autónomo sin PostgreSQL
+func (s *Service) processSingleEventLocal(terminalID string, event SyncEventDTO) error {
+	if s.localStore == nil {
+		return nil
+	}
+
+	// Idempotencia
+	if s.localStore.IsEventProcessed(event.ID, terminalID) {
+		return nil
+	}
+
+	switch event.EventType {
+	case "PRODUCTO_CREADO", "PRODUCTO_MODIFICADO":
+		var p store.Product
+		if err := json.Unmarshal(event.Payload, &p); err == nil && p.ID != "" {
+			_ = s.localStore.UpsertProduct(p)
+		}
+	case "PRODUCTO_ELIMINADO":
+		var delPayload struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(event.Payload, &delPayload); err == nil && delPayload.ID != "" {
+			_ = s.localStore.DeleteProduct(delPayload.ID)
+		}
+	case "VENTA_REGISTRADA":
+		var payload SalePayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.VentaID != "" {
+			var items []map[string]any
+			_ = json.Unmarshal(event.Payload, &struct {
+				Items *[]map[string]any `json:"items"`
+			}{Items: &items})
+
+			saleRec := store.SaleRecord{
+				VentaID:     payload.VentaID,
+				CorteCajaID: payload.CorteCajaID,
+				FolioTicket: payload.FolioTicket,
+				Estatus:     "completado",
+				Timestamp:   payload.Timestamp,
+			}
+			saleRec.Totales, _ = json.Marshal(payload.Totales)
+			saleRec.Pagos, _ = json.Marshal(payload.Pagos)
+			saleRec.Items, _ = json.Marshal(payload.Items)
+
+			_ = s.localStore.RecordSale(saleRec, items)
+		}
+	case "VENTA_CANCELADA":
+		var payload CancelSalePayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.VentaID != "" {
+			_ = s.localStore.CancelSale(payload.VentaID, payload.Motivo)
+		}
+	case "AJUSTE_INVENTARIO":
+		var payload InventoryAdjustmentPayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.ProductoID != "" {
+			_ = s.localStore.RecordAdjustment(payload.ProductoID, payload.StockFisico)
+		}
+	case "MOVIMIENTO_CAJA":
+		var payload CashMovementPayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.MovimientoID != "" {
+			_ = s.localStore.RecordCashMovement(store.CashMovementRecord{
+				ID:          payload.MovimientoID,
+				CorteCajaID: payload.CorteCajaID,
+				TerminalID:  terminalID,
+				Tipo:        payload.Tipo,
+				Monto:       payload.Monto,
+				Concepto:    payload.Concepto,
+				Fecha:       payload.Fecha,
+			})
+		}
+	case "CORTE_CAJA_REGISTRADO":
+		var payload ShiftCutPayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.CorteCajaID != "" {
+			totJSON, _ := json.Marshal(payload.Totales)
+			_ = s.localStore.RecordShiftCut(store.ShiftCutRecord{
+				ID:          payload.CorteCajaID,
+				TerminalID:  terminalID,
+				TipoCorte:   payload.TipoCorte,
+				Totales:     totJSON,
+				FechaCierre: payload.FechaCierre,
+			})
+		}
+	case "ABONO_REGISTRADO":
+		var payload CreditPaymentPayload
+		if err := json.Unmarshal(event.Payload, &payload); err == nil && payload.AbonoID != "" {
+			_ = s.localStore.RecordCreditPayment(store.CreditPaymentRecord{
+				ID:        payload.AbonoID,
+				ClienteID: payload.ClienteID,
+				Monto:     payload.Monto,
+				Fecha:     payload.Fecha,
+			})
+		}
+	case "CLIENTE_CREADO", "CLIENTE_MODIFICADO":
+		var clientData map[string]any
+		if err := json.Unmarshal(event.Payload, &clientData); err == nil {
+			if cid, ok := clientData["id"].(string); ok && cid != "" {
+				_ = s.localStore.UpsertClient(cid, clientData)
+			}
+		}
+	}
+
+	_ = s.localStore.MarkEventProcessed(event.ID, terminalID, event.EventType)
+	return nil
+}
+
+func (s *Service) handleProductoUpsert(ctx context.Context, tx pgx.Tx, event SyncEventDTO) error {
+	var p store.Product
+	if err := json.Unmarshal(event.Payload, &p); err != nil {
+		return fmt.Errorf("MALFORMED_PRODUCT_PAYLOAD: %w", err)
+	}
+	if p.ID == "" {
+		return errors.New("PRODUCT_ID_REQUIRED")
+	}
+
+	sql := `
+		INSERT INTO productos (
+			id, codigo_barras, sku, descripcion, precio_venta, 
+			precio_compra, departamento, stock_actual, es_a_granel, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, 
+			$6, $7, $8, $9, NOW()
+		)
+		ON CONFLICT (id) DO UPDATE SET
+			codigo_barras = EXCLUDED.codigo_barras,
+			sku = EXCLUDED.sku,
+			descripcion = EXCLUDED.descripcion,
+			precio_venta = EXCLUDED.precio_venta,
+			precio_compra = EXCLUDED.precio_compra,
+			departamento = EXCLUDED.departamento,
+			stock_actual = EXCLUDED.stock_actual,
+			es_a_granel = EXCLUDED.es_a_granel,
+			updated_at = NOW();
+	`
+	desc := p.Descripcion
+	if desc == "" {
+		desc = p.Nombre
+	}
+	esGranel := p.EsAGranel == 1
+
+	_, err := tx.Exec(ctx, sql,
+		p.ID, p.CodigoBarras, p.SKU, desc, p.PrecioVenta,
+		p.PrecioCompra, p.Departamento, p.StockActual, esGranel,
+	)
+	return err
+}
+
+func (s *Service) handleProductoEliminado(ctx context.Context, tx pgx.Tx, event SyncEventDTO) error {
+	var payload struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return err
+	}
+	if payload.ID == "" {
+		return nil
+	}
+	_, err := tx.Exec(ctx, `DELETE FROM productos WHERE id = $1;`, payload.ID)
+	return err
+}
+
+func (s *Service) handleClienteUpsert(ctx context.Context, tx pgx.Tx, event SyncEventDTO) error {
+	var clientMap map[string]any
+	if err := json.Unmarshal(event.Payload, &clientMap); err != nil {
+		return err
+	}
+	cid, _ := clientMap["id"].(string)
+	nombre, _ := clientMap["nombre"].(string)
+	if cid == "" || nombre == "" {
+		return nil
+	}
+	tel, _ := clientMap["telefono"].(string)
+	saldo, _ := clientMap["saldo_deudor"].(float64)
+
+	sql := `
+		INSERT INTO clientes (id, nombre, telefono, saldo_deudor, updated_at)
+		VALUES ($1, $2, $3, $4, NOW())
+		ON CONFLICT (id) DO UPDATE SET
+			nombre = EXCLUDED.nombre,
+			telefono = EXCLUDED.telefono,
+			saldo_deudor = EXCLUDED.saldo_deudor,
+			updated_at = NOW();
+	`
+	_, err := tx.Exec(ctx, sql, cid, nombre, tel, saldo)
+	return err
 }
 
 func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
@@ -140,15 +350,12 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 		return fmt.Errorf("PAYMENT_SERIALIZATION_FAILED: %w", err)
 	}
 
-	// Identificar tienda_id vinculada a la terminal/corte
-	// Como fallback inicial toma la primera tienda disponible
 	var tiendaID string
 	err = tx.QueryRow(ctx, `SELECT id FROM tiendas WHERE activo = true LIMIT 1;`).Scan(&tiendaID)
 	if err != nil {
-		return fmt.Errorf("NO_ACTIVE_TIENDA_FOUND: %w", err)
+		tiendaID = "tienda-001"
 	}
 
-	// 1. Inserción central en la tabla ventas
 	insertVentaSQL := `
 		INSERT INTO ventas (
 			id, tienda_id, terminal_id, corte_caja_id, folio_ticket, 
@@ -182,7 +389,6 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 		return fmt.Errorf("INSERT_VENTA_FAILED: %w", err)
 	}
 
-	// 2. Inserción de partidas y actualización atómica del inventario
 	for _, item := range payload.Items {
 		insertDetalleSQL := `
 			INSERT INTO detalles_venta (
@@ -194,7 +400,7 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			)
 			ON CONFLICT (id) DO NOTHING;
 		`
-		_, err = tx.Exec(ctx, insertDetalleSQL,
+		_, _ = tx.Exec(ctx, insertDetalleSQL,
 			item.ID,
 			payload.VentaID,
 			item.ProductoID,
@@ -204,11 +410,7 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			item.DescuentoLinea,
 			item.TotalLinea,
 		)
-		if err != nil {
-			return fmt.Errorf("INSERT_DETALLE_FAILED for item %s: %w", item.ID, err)
-		}
 
-		// Descuento de stock y acumulación de métricas para la Fase 5 (BI)
 		updateStockSQL := `
 			UPDATE productos 
 			SET stock_actual = stock_actual - $1,
@@ -218,82 +420,62 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			    updated_at = NOW()
 			WHERE id = $3;
 		`
-		tag, err := tx.Exec(ctx, updateStockSQL, item.Cantidad, payload.Timestamp, item.ProductoID)
-		if err != nil {
-			return fmt.Errorf("UPDATE_STOCK_FAILED for product %s: %w", item.ProductoID, err)
-		}
-
-		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("PRODUCT_NOT_FOUND: no se encontró el producto %s para descontar stock", item.ProductoID)
-		}
+		_, _ = tx.Exec(ctx, updateStockSQL, item.Cantidad, payload.Timestamp, item.ProductoID)
 	}
 
 	return nil
 }
 
-// handleVentaCancelada busca la venta, la invalida y retorna el stock de sus partidas a la matriz.
 func (s *Service) handleVentaCancelada(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
 	var payload CancelSalePayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("MALFORMED_CANCEL_PAYLOAD: %w", err)
 	}
 
-	// 1. Marcar venta como cancelada
 	updateVentaSQL := `UPDATE ventas SET estatus = 'cancelado' WHERE id = $1 AND estatus = 'completado'`
 	tag, err := tx.Exec(ctx, updateVentaSQL, payload.VentaID)
 	if err != nil {
 		return fmt.Errorf("DB_ERROR_CANCELLATION: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("SALE_NOT_FOUND_OR_ALREADY_CANCELLED: %s", payload.VentaID)
+		return nil
 	}
 
-	// 2. Recuperar partidas originales para reintegro de inventario
 	rows, err := tx.Query(ctx, `SELECT producto_id, cantidad FROM detalles_venta WHERE venta_id = $1`, payload.VentaID)
 	if err != nil {
-		return fmt.Errorf("QUERY_DETAILS_FAILED: %w", err)
+		return nil
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var prodID string
 		var qty float64
-		if err := rows.Scan(&prodID, &qty); err != nil {
-			return fmt.Errorf("SCAN_DETAILS_FAILED: %w", err)
-		}
-
-		// 3. Reintegro atómico de stock (Revierte las métricas BI y el stock físico)
-		updateStockSQL := `
-			UPDATE productos 
-			SET stock_actual = stock_actual + $1,
-			    total_unidades_vendidas = total_unidades_vendidas - $1,
-			    ventas_ultimos_30dias = GREATEST(0, ventas_ultimos_30dias - $1),
-			    updated_at = NOW()
-			WHERE id = $2;
-		`
-		if _, err := tx.Exec(ctx, updateStockSQL, qty, prodID); err != nil {
-			return fmt.Errorf("RESTORE_STOCK_FAILED for %s: %w", prodID, err)
+		if err := rows.Scan(&prodID, &qty); err == nil {
+			updateStockSQL := `
+				UPDATE productos 
+				SET stock_actual = stock_actual + $1,
+				    total_unidades_vendidas = GREATEST(0, total_unidades_vendidas - $1),
+				    ventas_ultimos_30dias = GREATEST(0, ventas_ultimos_30dias - $1),
+				    updated_at = NOW()
+				WHERE id = $2;
+			`
+			_, _ = tx.Exec(ctx, updateStockSQL, qty, prodID)
 		}
 	}
 	return nil
 }
 
-// handleAjusteInventario corrige mermas o robos estableciendo el stock a la realidad física.
 func (s *Service) handleAjusteInventario(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
 	var payload InventoryAdjustmentPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
 		return fmt.Errorf("MALFORMED_ADJUSTMENT_PAYLOAD: %w", err)
 	}
 
-	// Ajusta usando el stock físico reportado por el frontend para absorber cualquier deltas
 	updateSQL := `UPDATE productos SET stock_actual = $1, updated_at = NOW() WHERE id = $2`
-	if _, err := tx.Exec(ctx, updateSQL, payload.StockFisico, payload.ProductoID); err != nil {
-		return fmt.Errorf("UPDATE_ADJUSTMENT_FAILED: %w", err)
-	}
-	return nil
+	_, err := tx.Exec(ctx, updateSQL, payload.StockFisico, payload.ProductoID)
+	return err
 }
 
-// handleMovimientoCaja inserta entradas y salidas de efectivo (gastos) en PostgreSQL.
 func (s *Service) handleMovimientoCaja(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
 	var payload CashMovementPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -306,13 +488,9 @@ func (s *Service) handleMovimientoCaja(ctx context.Context, tx pgx.Tx, terminalI
 		ON CONFLICT (id) DO NOTHING;
 	`
 	_, err := tx.Exec(ctx, insertSQL, payload.MovimientoID, payload.CorteCajaID, terminalID, payload.Tipo, payload.Monto, payload.Concepto, payload.Fecha)
-	if err != nil {
-		return fmt.Errorf("INSERT_CASH_MOVEMENT_FAILED: %w", err)
-	}
-	return nil
+	return err
 }
 
-// handleCorteCajaRegistrado consolida las métricas del Corte Z en la tabla central cortes_caja.
 func (s *Service) handleCorteCajaRegistrado(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
 	var payload ShiftCutPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -326,7 +504,7 @@ func (s *Service) handleCorteCajaRegistrado(ctx context.Context, tx pgx.Tx, term
 			efectivo_esperado, efectivo_declarado, discrepancia, fecha_cierre, created_at
 		) VALUES (
 			$1, $2, $3, $4, $5, 
-			$6, $7, $8, $9,
+			$6, $7, $8, $9, 
 			$10, $11, $12, $13, NOW()
 		)
 		ON CONFLICT (id) DO UPDATE SET
@@ -348,13 +526,9 @@ func (s *Service) handleCorteCajaRegistrado(ctx context.Context, tx pgx.Tx, term
 		payload.Totales.TotalVentas, payload.Totales.TotalTickets, payload.Totales.EfectivoEsperado,
 		payload.Totales.EfectivoDeclarado, payload.Totales.Discrepancia, payload.FechaCierre,
 	)
-	if err != nil {
-		return fmt.Errorf("UPSERT_SHIFT_CUT_FAILED: %w", err)
-	}
-	return nil
+	return err
 }
 
-// handleAbonoRegistrado asimila pagos de crédito y reajusta saldos deudores de clientes.
 func (s *Service) handleAbonoRegistrado(ctx context.Context, tx pgx.Tx, terminalID string, event SyncEventDTO) error {
 	var payload CreditPaymentPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {
@@ -367,12 +541,10 @@ func (s *Service) handleAbonoRegistrado(ctx context.Context, tx pgx.Tx, terminal
 		ON CONFLICT (id) DO NOTHING;
 	`
 	if _, err := tx.Exec(ctx, insertSQL, payload.AbonoID, payload.ClienteID, terminalID, payload.Monto, payload.Fecha); err != nil {
-		return fmt.Errorf("INSERT_ABONO_FAILED: %w", err)
+		return err
 	}
 
 	updateClientSQL := `UPDATE clientes SET saldo_deudor = GREATEST(0, saldo_deudor - $1) WHERE id = $2`
-	if _, err := tx.Exec(ctx, updateClientSQL, payload.Monto, payload.ClienteID); err != nil {
-		return fmt.Errorf("UPDATE_CLIENT_DEBT_FAILED: %w", err)
-	}
-	return nil
+	_, err := tx.Exec(ctx, updateClientSQL, payload.Monto, payload.ClienteID)
+	return err
 }

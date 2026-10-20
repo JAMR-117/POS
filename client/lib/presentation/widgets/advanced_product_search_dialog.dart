@@ -11,18 +11,21 @@ class AdvancedProductSearchDialog extends StatefulWidget {
   final SalesRepository salesRepository;
   final ProductRepository? productRepository;
   final Function(Product) onProductSelected;
+  final String initialQuery;
 
   const AdvancedProductSearchDialog({
     super.key,
     required this.salesRepository,
     this.productRepository,
     required this.onProductSelected,
+    this.initialQuery = '',
   });
 
   static Future<Product?> show({
     required BuildContext context,
     required SalesRepository salesRepository,
     ProductRepository? productRepository,
+    String initialQuery = '',
   }) async {
     return showDialog<Product>(
       context: context,
@@ -31,6 +34,7 @@ class AdvancedProductSearchDialog extends StatefulWidget {
         salesRepository: salesRepository,
         productRepository: productRepository,
         onProductSelected: (p) => Navigator.of(ctx).pop(p),
+        initialQuery: initialQuery,
       ),
     );
   }
@@ -51,7 +55,8 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
   @override
   void initState() {
     super.initState();
-    _performSearch('');
+    _searchController.text = widget.initialQuery;
+    _performSearch(widget.initialQuery);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _searchFocusNode.requestFocus();
     });
@@ -86,6 +91,12 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _filterByMold(String mold) {
+    _searchController.text = 'molde:$mold';
+    _performSearch('molde:$mold');
+    _searchFocusNode.requestFocus();
   }
 
   void _selectCurrent() {
@@ -182,11 +193,11 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'SUPER-BUSCADOR DE PRODUCTOS Y MOLDES [F1]',
+                'Buscar',
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, letterSpacing: 0.5),
               ),
               Text(
-                'Búsqueda ágil por SKU, Código de barras, Marca, Nombre, Descripción o Molde Cross-Reference',
+                'Búsqueda ágil por SKU, Código de barras, Marca, Nombre, Descripción o Molde',
                 style: TextStyle(fontSize: 12, color: Colors.grey),
               ),
             ],
@@ -262,7 +273,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                 SizedBox(width: 100, child: Text('CLAVE/SKU', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 Expanded(flex: 3, child: Text('DESCRIPCIÓN / PRODUCTO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 SizedBox(width: 80, child: Text('MARCA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 100, child: Text('MOLDE (EQ.)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 130, child: Text('MOLDE (EQ.)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 SizedBox(width: 100, child: Text('UBICACIÓN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 SizedBox(width: 70, child: Text('STOCK', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 SizedBox(width: 80, child: Text('PÚBLICO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
@@ -341,29 +352,64 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 100,
+                          width: 130,
                           child: p.codigoEquivalencia != null && p.codigoEquivalencia!.isNotEmpty
-                              ? Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.blue.shade50,
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                  child: Text(
-                                    p.codigoEquivalencia!,
-                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
-                                    overflow: TextOverflow.ellipsis,
+                              ? Tooltip(
+                                  message: 'Ver variantes y alternativas de Molde: ${p.codigoEquivalencia}',
+                                  child: Material(
+                                    color: Colors.transparent,
+                                    child: InkWell(
+                                      onTap: () => _filterByMold(p.codigoEquivalencia!),
+                                      borderRadius: BorderRadius.circular(4),
+                                      hoverColor: const Color(0xFF1F4E79).withValues(alpha: 0.15),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFE3F2FD),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: const Color(0xFF1976D2)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.link, size: 12, color: Color(0xFF0D47A1)),
+                                            const SizedBox(width: 3),
+                                            Flexible(
+                                              child: Text(
+                                                'Molde: ${p.codigoEquivalencia!}',
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Color(0xFF0D47A1),
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 )
                               : const Text('-', style: TextStyle(color: Colors.grey)),
                         ),
                         SizedBox(
                           width: 100,
-                          child: Text(
-                            p.ubicacion != null && p.ubicacion!.isNotEmpty ? '📍 ${p.ubicacion}' : '-',
-                            style: TextStyle(fontSize: 11, color: Colors.brown.shade700, fontWeight: FontWeight.w500),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                          child: p.ubicacion != null && p.ubicacion!.isNotEmpty
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.amber.shade50,
+                                    borderRadius: BorderRadius.circular(3),
+                                    border: Border.all(color: Colors.amber.shade400),
+                                  ),
+                                  child: Text(
+                                    '📍 ${p.ubicacion}',
+                                    style: TextStyle(fontSize: 11, color: Colors.brown.shade900, fontWeight: FontWeight.bold),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                )
+                              : const Text('-', style: TextStyle(color: Colors.grey)),
                         ),
                         SizedBox(
                           width: 70,

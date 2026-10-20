@@ -87,7 +87,11 @@ class ProductRepository {
     final List<dynamic> whereArgs = [];
 
     if (term.isNotEmpty) {
-      if (isDeepSearch) {
+      if (term.toLowerCase().startsWith('molde:')) {
+        final moldVal = term.substring(6).trim().toUpperCase();
+        whereClauses.add('UPPER(codigo_equivalencia) = ?');
+        whereArgs.add(moldVal);
+      } else if (isDeepSearch) {
         whereClauses.add(
           '(descripcion LIKE ? OR nombre LIKE ? OR sku LIKE ? OR marca LIKE ? OR codigo_barras LIKE ? OR codigo_equivalencia LIKE ? OR ubicacion LIKE ?)',
         );
@@ -181,17 +185,66 @@ class ProductRepository {
     final isoNow = DateTime.now().toUtc().toIso8601String();
     int importedCount = 0;
 
+    // Mapear productos existentes para reutilizar id si ya existen por código o SKU
+    final existingRows = await db.query('productos', columns: ['id', 'codigo_barras', 'sku']);
+    final Map<String, String> existingIdsByCode = {};
+    for (final r in existingRows) {
+      final id = r['id'] as String;
+      final cb = r['codigo_barras'] as String?;
+      final sku = r['sku'] as String?;
+      if (cb != null && cb.isNotEmpty) existingIdsByCode[cb] = id;
+      if (sku != null && sku.isNotEmpty) existingIdsByCode[sku] = id;
+    }
+
+    // Registrar departamentos encontrados en el CSV
+    final Set<String> deptos = {};
     for (final row in parsedData) {
-      final String id = row['id']?.toString() ?? _generateLocalUUID();
+      final d = row['departamento']?.toString().trim();
+      if (d != null && d.isNotEmpty) {
+        deptos.add(d);
+      }
+    }
+    for (final dep in deptos) {
+      final depId = 'DEP_${dep.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '_')}';
+      batch.insert(
+        'departamentos',
+        {
+          'id': depId,
+          'nombre': dep,
+          'created_at': isoNow,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+    }
+
+    for (final row in parsedData) {
+      final String? codigo = row['codigo']?.toString() ?? row['codigo_barras']?.toString();
+      final String? sku = row['sku']?.toString() ?? codigo;
+      
+      String id = row['id']?.toString() ?? '';
+      if (id.isEmpty) {
+        if (codigo != null && existingIdsByCode.containsKey(codigo)) {
+          id = existingIdsByCode[codigo]!;
+        } else if (sku != null && existingIdsByCode.containsKey(sku)) {
+          id = existingIdsByCode[sku]!;
+        } else {
+          id = _generateLocalUUID();
+        }
+      }
+
       final String desc = row['descripcion']?.toString() ?? 'Producto Importado';
       final String nombre = row['nombre']?.toString() ?? desc;
+      final double stockVal = (row['stock_actual'] as num?)?.toDouble() ?? 
+                             (row['stock'] as num?)?.toDouble() ?? 0.0;
+      final double stockMinVal = (row['stock_minimo'] as num?)?.toDouble() ?? 5.0;
+      final int esGranelVal = (row['es_a_granel'] as int?) ?? (stockVal % 1 != 0 ? 1 : 0);
 
       batch.insert(
         'productos',
         {
           'id': id,
-          'codigo_barras': row['codigo']?.toString(),
-          'sku': row['codigo']?.toString(),
+          'codigo_barras': codigo,
+          'sku': sku,
           'nombre': nombre,
           'descripcion': desc,
           'marca': row['marca']?.toString() ?? 'Genérica',
@@ -199,10 +252,13 @@ class ProductRepository {
           'ubicacion': row['ubicacion']?.toString(),
           'precio_compra': (row['precio_compra'] as num?)?.toDouble() ?? 0.0,
           'precio_venta': (row['precio_venta'] as num?)?.toDouble() ?? 0.0,
+          'precio_cerrajero': (row['precio_cerrajero'] as num?)?.toDouble(),
+          'precio_taller': (row['precio_taller'] as num?)?.toDouble(),
           'porcentaje_impuesto': (row['porcentaje_impuesto'] as num?)?.toDouble() ?? 0.16,
           'departamento': row['departamento']?.toString() ?? 'General',
-          'stock_actual': (row['stock'] as num?)?.toDouble() ?? 0.0,
-          'es_a_granel': ((row['stock'] as num?)?.toDouble() ?? 0.0) % 1 != 0 ? 1 : 0,
+          'stock_actual': stockVal,
+          'stock_minimo': stockMinVal,
+          'es_a_granel': esGranelVal,
           'cantidad_mayoreo': (row['cantidad_mayoreo'] as num?)?.toDouble(),
           'precio_mayoreo': (row['precio_mayoreo'] as num?)?.toDouble(),
           'es_servicio': (row['es_servicio'] as int?) ?? 0,

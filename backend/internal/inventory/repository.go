@@ -4,19 +4,50 @@ import (
 	"context"
 	"fmt"
 
+	"pos-backend/internal/store"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repository struct {
-	dbPool *pgxpool.Pool
+	dbPool     *pgxpool.Pool
+	localStore *store.Store
 }
 
-func NewRepository(dbPool *pgxpool.Pool) *Repository {
-	return &Repository{dbPool: dbPool}
+func NewRepository(dbPool *pgxpool.Pool, localStore *store.Store) *Repository {
+	return &Repository{
+		dbPool:     dbPool,
+		localStore: localStore,
+	}
 }
 
 // GetStockAlerts extrae productos agotados, por debajo de stock mínimo o con días restantes inferiores al umbral
 func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDays float64) ([]StockAlertItem, error) {
+	if r.dbPool == nil {
+		if r.localStore == nil {
+			return []StockAlertItem{}, nil
+		}
+		dtos := r.localStore.GetAlerts(maxDays)
+		items := make([]StockAlertItem, len(dtos))
+		for i, d := range dtos {
+			items[i] = StockAlertItem{
+				ID:                  d.ID,
+				TiendaID:            d.TiendaID,
+				CodigoBarras:        d.CodigoBarras,
+				SKU:                 d.SKU,
+				Descripcion:         d.Descripcion,
+				StockActual:         d.StockActual,
+				StockMinimo:         d.StockMinimo,
+				VentasUltimos30Dias: d.VentasUltimos30Dias,
+				VelocidadDiaria:     d.VelocidadDiaria,
+				DiasRestantes:       d.DiasRestantes,
+				NivelRiesgo:         d.NivelRiesgo,
+				UltimaVentaAt:       d.UltimaVentaAt,
+			}
+		}
+		return items, nil
+	}
+
 	// stock_minimo por defecto = 5.0 si la columna no existe o es nula; velocity = ventas_ultimos_30dias / 30.0
 	query := `
 		WITH metricas AS (
@@ -96,6 +127,31 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 
 // GetCatalogVelocity lista el catálogo maestro ordenado dinámicamente por ventas y métrica de rotación
 func (r *Repository) GetCatalogVelocity(ctx context.Context, tiendaID string, orderBy string, limit int, offset int) ([]VelocityItem, error) {
+	if r.dbPool == nil {
+		if r.localStore == nil {
+			return []VelocityItem{}, nil
+		}
+		dtos := r.localStore.GetVelocity(orderBy, limit, offset)
+		items := make([]VelocityItem, len(dtos))
+		for i, d := range dtos {
+			items[i] = VelocityItem{
+				ID:                    d.ID,
+				TiendaID:              d.TiendaID,
+				CodigoBarras:          d.CodigoBarras,
+				SKU:                   d.SKU,
+				Descripcion:           d.Descripcion,
+				Departamento:          d.Departamento,
+				StockActual:           d.StockActual,
+				TotalUnidadesVendidas: d.TotalUnidadesVendidas,
+				VentasUltimos30Dias:   d.VentasUltimos30Dias,
+				VelocidadDiaria:       d.VelocidadDiaria,
+				DiasRestantes:         d.DiasRestantes,
+				UltimaVentaAt:         d.UltimaVentaAt,
+			}
+		}
+		return items, nil
+	}
+
 	sortCol := "ventas_ultimos_30dias DESC"
 	switch orderBy {
 	case "stock_asc":
@@ -166,6 +222,9 @@ func (r *Repository) GetCatalogVelocity(ctx context.Context, tiendaID string, or
 
 // GetDefaultTiendaID resuelve la primera tienda activa en caso de omitir el parámetro en los requests
 func (r *Repository) GetDefaultTiendaID(ctx context.Context) (string, error) {
+	if r.dbPool == nil {
+		return "tienda-001", nil
+	}
 	var id string
 	err := r.dbPool.QueryRow(ctx, `SELECT id FROM tiendas WHERE activo = true LIMIT 1;`).Scan(&id)
 	return id, err

@@ -224,20 +224,49 @@ class _PosScreenState extends State<PosScreen> {
                         if (prod.sku != null && prod.sku!.isNotEmpty)
                           Text('Clave/SKU: ${prod.sku}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1F4E79))),
                         if (prod.codigoEquivalencia != null && prod.codigoEquivalencia!.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
-                              borderRadius: BorderRadius.circular(3),
-                              border: Border.all(color: Colors.blue.shade200),
-                            ),
-                            child: Text(
-                              'Molde: ${prod.codigoEquivalencia}',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue.shade900),
+                          Tooltip(
+                            message: 'Ver todas las variantes del Molde: ${prod.codigoEquivalencia}',
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: () {
+                                  Navigator.of(ctx).pop();
+                                  _openAdvancedProductSearch(initialQuery: 'molde:${prod.codigoEquivalencia}');
+                                },
+                                borderRadius: BorderRadius.circular(4),
+                                hoverColor: const Color(0xFF1F4E79).withValues(alpha: 0.15),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE3F2FD),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFF1976D2)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.link, size: 12, color: Color(0xFF0D47A1)),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        'Molde: ${prod.codigoEquivalencia}',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF0D47A1)),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         if (prod.ubicacion != null && prod.ubicacion!.isNotEmpty)
-                          Text('📍 ${prod.ubicacion}', style: const TextStyle(fontSize: 11, color: Color(0xFFD84315), fontWeight: FontWeight.w500)),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(3),
+                              border: Border.all(color: Colors.amber.shade400),
+                            ),
+                            child: Text('📍 ${prod.ubicacion}', style: TextStyle(fontSize: 11, color: Colors.brown.shade900, fontWeight: FontWeight.bold)),
+                          ),
                         if (!isService)
                           Text('Stock: ${prod.stockActual}', style: TextStyle(fontSize: 11, color: prod.stockActual <= 5 ? Colors.red : Colors.green.shade800, fontWeight: FontWeight.bold))
                         else
@@ -574,10 +603,11 @@ class _PosScreenState extends State<PosScreen> {
     ).then((_) => _refocusSearch());
   }
 
-  Future<void> _openAdvancedProductSearch() async {
+  Future<void> _openAdvancedProductSearch({String initialQuery = ''}) async {
     final selectedProduct = await AdvancedProductSearchDialog.show(
       context: context,
       salesRepository: widget.cartController.salesRepository,
+      initialQuery: initialQuery,
     );
     if (selectedProduct != null && mounted) {
       widget.cartController.addProduct(selectedProduct);
@@ -888,10 +918,10 @@ class _PosScreenState extends State<PosScreen> {
           ),
           const SizedBox(width: 8),
 
-          // Super Buscador [F1]
+          // Buscar [F1]
           IconButton(
             icon: const Icon(Icons.manage_search, color: Color(0xFF1F4E79)),
-            tooltip: 'Super-Buscador de Moldes [F1]',
+            tooltip: 'Buscar [F1]',
             onPressed: _openAdvancedProductSearch,
           ),
 
@@ -1398,7 +1428,7 @@ class _PosScreenState extends State<PosScreen> {
             runSpacing: 6,
             alignment: WrapAlignment.center,
             children: [
-              _buildKeyBadge('F1', 'Buscador Pro', _openAdvancedProductSearch),
+              _buildKeyBadge('F1', 'Buscar', _openAdvancedProductSearch),
               _buildKeyBadge('F2', 'Art. Común', () {
                 CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
               }),

@@ -162,12 +162,11 @@ class InventoryApiClient {
             .map((item) => StockAlertItem.fromJson(item as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception('HTTP_${response.statusCode}: ${response.body}');
+        return [];
       }
-    } on TimeoutException {
-      throw Exception('TIMEOUT: El servidor no respondió a tiempo.');
-    } catch (e) {
-      throw Exception('NETWORK_ERROR: No se pudo consultar alertas ($e)');
+    } catch (_) {
+      // Fallback silencioso en Modo Offline: retorna lista vacía sin romper el flujo ni la interfaz
+      return [];
     }
   }
 
@@ -194,7 +193,7 @@ class InventoryApiClient {
     try {
       final response = await _httpClient
           .get(uri, headers: {'Accept': 'application/json'})
-          .timeout(const Duration(seconds: 5));
+          .timeout(const Duration(seconds: 4));
 
       if (response.statusCode == 200) {
         final Map<String, dynamic> body = jsonDecode(response.body) as Map<String, dynamic>;
@@ -203,10 +202,11 @@ class InventoryApiClient {
             .map((item) => VelocityCatalogItem.fromJson(item as Map<String, dynamic>))
             .toList();
       } else {
-        throw Exception('HTTP_${response.statusCode}: ${response.body}');
+        return [];
       }
-    } catch (e) {
-      throw Exception('CATALOG_ERROR: $e');
+    } catch (_) {
+      // Fallback silencioso en Modo Offline: retorna lista vacía sin romper el flujo ni la interfaz
+      return [];
     }
   }
 

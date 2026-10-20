@@ -260,6 +260,25 @@ class SalesRepository {
     if (cleanQuery.isEmpty) return [];
 
     final db = await _dbHelper.database;
+
+    // Soporte especializado para búsqueda directa por Molde (Cross-Reference): 'molde:R52'
+    if (cleanQuery.toLowerCase().startsWith('molde:')) {
+      final moldTerm = cleanQuery.substring(6).trim().toUpperCase();
+      if (moldTerm.isEmpty) return [];
+
+      final moldRows = await db.rawQuery('''
+        SELECT * FROM productos
+        WHERE UPPER(codigo_equivalencia) = ?
+        ORDER BY (CASE WHEN stock_actual > 0 THEN 0 ELSE 1 END) ASC, 
+                 stock_actual DESC, 
+                 marca ASC, 
+                 nombre ASC
+        LIMIT ?
+      ''', [moldTerm, limit]);
+
+      return moldRows.map((r) => Product.fromMap(r)).toList();
+    }
+
     final bool isDeepSearch = cleanQuery.startsWith('%');
     final String searchTerm = isDeepSearch ? cleanQuery.substring(1).trim() : cleanQuery;
     
@@ -277,10 +296,11 @@ class SalesRepository {
            OR sku LIKE ? 
            OR marca LIKE ? 
            OR codigo_barras LIKE ?
+           OR codigo_equivalencia LIKE ?
         LIMIT ?
-      ''', [pattern, pattern, pattern, pattern, pattern, limit]);
+      ''', [pattern, pattern, pattern, pattern, pattern, pattern, limit]);
     } else {
-      // Búsqueda estándar (sin %): busca en codigo_barras, sku, nombre y marca
+      // Búsqueda estándar (sin %): busca en codigo_barras, sku, nombre, marca y molde
       final pattern = '%$searchTerm%';
       directRows = await db.rawQuery('''
         SELECT * FROM productos
@@ -289,8 +309,10 @@ class SalesRepository {
            OR sku LIKE ? 
            OR nombre LIKE ? 
            OR marca LIKE ?
+           OR codigo_equivalencia = ?
+           OR codigo_equivalencia LIKE ?
         LIMIT ?
-      ''', [searchTerm, searchTerm, pattern, pattern, pattern, limit]);
+      ''', [searchTerm, searchTerm, pattern, pattern, pattern, searchTerm, pattern, limit]);
     }
 
     final List<Product> directProducts = directRows.map((r) => Product.fromMap(r)).toList();

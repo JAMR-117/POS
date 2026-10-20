@@ -106,8 +106,10 @@ class SyncWorker extends ChangeNotifier {
       await _applyNetworkFailureBackoff(e.message);
       _isOnline = false;
       _updateStatus(SyncStatusState.offline);
-    } catch (e) {
-      _updateStatus(SyncStatusState.pendingSync);
+    } catch (_) {
+      // Captura silenciosa de cualquier excepción de red o transporte
+      _isOnline = false;
+      _updateStatus(SyncStatusState.offline);
     } finally {
       _isProcessing = false;
     }

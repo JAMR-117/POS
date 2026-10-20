@@ -1,0 +1,63 @@
+{
+  "products": {},
+  "processed_events": {
+    "584778001ac2492a8267241885ce8c7b_terminal-default-001": {
+      "event_id": "584778001ac2492a8267241885ce8c7b",
+      "terminal_id": "terminal-default-001",
+      "event_type": "VENTA_REGISTRADA",
+      "processed_at": "2026-10-20T19:29:55.6290104Z"
+    },
+    "840eabd9eaae45c69f86a92e906403c9_terminal-default-001": {
+      "event_id": "840eabd9eaae45c69f86a92e906403c9",
+      "terminal_id": "terminal-default-001",
+      "event_type": "TURNO_ABIERTO",
+      "processed_at": "2026-10-20T19:29:55.5674865Z"
+    }
+  },
+  "sales": {
+    "584778001ac2492a8267241885ce8c7b": {
+      "venta_id": "584778001ac2492a8267241885ce8c7b",
+      "corte_caja_id": "db4a0bef5f48440588caec1564f4b56b",
+      "totales": {
+        "subtotal": 9.1,
+        "descuentos": 0,
+        "impuestos": 0,
+        "total": 9.1
+      },
+      "pagos": [
+        {
+          "metodo": "efectivo",
+          "monto": 9.1
+        }
+      ],
+      "items": [
+        {
+          "id": "0b095d53992f49d3b63491e849942bcc",
+          "producto_id": "1871dee958bff6cf90f6a8dc7f1fbbb2",
+          "descripcion": "R52 LLAVE NIQ JMA/Alba",
+          "cantidad": 1,
+          "precio_historico": 3.8,
+          "costo_historico": 3.3,
+          "descuento_linea": 0,
+          "total_linea": 3.8
+        },
+        {
+          "id": "29aaea195403494598f18db6d91892dc",
+          "producto_id": "daa3d2beef2addf49dc6cd1af6167c65",
+          "descripcion": "R52LE (DEX-52L) LLAVE NIQUELADA",
+          "cantidad": 1,
+          "precio_historico": 5.3,
+          "costo_historico": 4.76,
+          "descuento_linea": 0,
+          "total_linea": 5.3
+        }
+      ],
+      "estatus": "completado",
+      "timestamp": "2026-10-20T19:25:59.03Z"
+    }
+  },
+  "cash_movements": [],
+  "shift_cuts": {},
+  "credit_payments": [],
+  "clients": {}
+}
