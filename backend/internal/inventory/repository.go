@@ -31,24 +31,26 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 		items := make([]StockAlertItem, len(dtos))
 		for i, d := range dtos {
 			items[i] = StockAlertItem{
-				ID:                  d.ID,
-				TiendaID:            d.TiendaID,
-				CodigoBarras:        d.CodigoBarras,
-				SKU:                 d.SKU,
-				Descripcion:         d.Descripcion,
-				StockActual:         d.StockActual,
-				StockMinimo:         d.StockMinimo,
-				VentasUltimos30Dias: d.VentasUltimos30Dias,
-				VelocidadDiaria:     d.VelocidadDiaria,
-				DiasRestantes:       d.DiasRestantes,
-				NivelRiesgo:         d.NivelRiesgo,
-				UltimaVentaAt:       d.UltimaVentaAt,
+				ID:                    d.ID,
+				TiendaID:              d.TiendaID,
+				CodigoBarras:          d.CodigoBarras,
+				SKU:                   d.SKU,
+				Descripcion:           d.Descripcion,
+				StockActual:           d.StockActual,
+				StockMinimo:           d.StockMinimo,
+				VentasUltimos30Dias:   d.VentasUltimos30Dias,
+				TotalUnidadesVendidas: d.TotalUnidadesVendidas,
+				VelocidadDiaria:       d.VelocidadDiaria,
+				DiasRestantes:         d.DiasRestantes,
+				NivelRiesgo:           d.NivelRiesgo,
+				UltimaVentaAt:         d.UltimaVentaAt,
+				Ubicacion:             d.Ubicacion,
+				CodigoEquivalencia:    d.CodigoEquivalencia,
 			}
 		}
 		return items, nil
 	}
 
-	// stock_minimo por defecto = 5.0 si la columna no existe o es nula; velocity = ventas_ultimos_30dias / 30.0
 	query := `
 		WITH metricas AS (
 			SELECT 
@@ -58,15 +60,19 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 				sku,
 				descripcion,
 				stock_actual,
-				5.0::NUMERIC(12, 3) AS stock_minimo,
-				ventas_ultimos_30dias,
-				ROUND((ventas_ultimos_30dias / 30.0), 3) AS velocidad_diaria,
+				COALESCE(stock_minimo, 5.0)::NUMERIC(12, 3) AS stock_minimo,
+				COALESCE(ventas_ultimos_30dias, 0.0) AS ventas_ultimos_30dias,
+				COALESCE(total_unidades_vendidas, 0.0) AS total_unidades_vendidas,
+				ROUND((COALESCE(ventas_ultimos_30dias, 0.0) / 30.0), 3) AS velocidad_diaria,
 				CASE 
 					WHEN ventas_ultimos_30dias > 0 THEN 
 						ROUND((stock_actual / NULLIF(ventas_ultimos_30dias / 30.0, 0)), 1)
 					ELSE 9999.0
 				END AS dias_restantes,
-				ultima_venta_at
+				ultima_venta_at,
+				ubicacion,
+				codigo_equivalencia,
+				COALESCE(es_servicio, 0) AS es_servicio
 			FROM productos
 			WHERE tienda_id = $1
 		)
@@ -79,6 +85,7 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 			stock_actual,
 			stock_minimo,
 			ventas_ultimos_30dias,
+			total_unidades_vendidas,
 			velocidad_diaria,
 			dias_restantes,
 			CASE 
@@ -86,11 +93,19 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 				WHEN dias_restantes <= ($2 / 2.0) OR stock_actual <= (stock_minimo / 2.0) THEN 'ALTO'
 				ELSE 'MODERADO'
 			END AS nivel_riesgo,
-			ultima_venta_at
+			ultima_venta_at,
+			ubicacion,
+			codigo_equivalencia
 		FROM metricas
-		WHERE stock_actual <= stock_minimo 
-		   OR (ventas_ultimos_30dias > 0 AND dias_restantes <= $2)
-		ORDER BY ventas_ultimos_30dias DESC, stock_actual ASC;
+		WHERE es_servicio = 0
+		  AND (stock_actual <= 0 
+		       OR stock_actual <= stock_minimo 
+		       OR (ventas_ultimos_30dias > 0 AND dias_restantes <= $2))
+		ORDER BY 
+			ventas_ultimos_30dias DESC, 
+			total_unidades_vendidas DESC, 
+			CASE WHEN stock_actual <= 0 THEN 0 ELSE 1 END ASC,
+			stock_actual ASC;
 	`
 
 	rows, err := r.dbPool.Query(ctx, query, tiendaID, maxDays)
@@ -111,10 +126,13 @@ func (r *Repository) GetStockAlerts(ctx context.Context, tiendaID string, maxDay
 			&item.StockActual,
 			&item.StockMinimo,
 			&item.VentasUltimos30Dias,
+			&item.TotalUnidadesVendidas,
 			&item.VelocidadDiaria,
 			&item.DiasRestantes,
 			&item.NivelRiesgo,
 			&item.UltimaVentaAt,
+			&item.Ubicacion,
+			&item.CodigoEquivalencia,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("SCAN_ALERT_FAILED: %w", err)

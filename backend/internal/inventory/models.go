@@ -6,18 +6,21 @@ import (
 
 // StockAlertItem representa la proyección predictiva de quiebre de stock
 type StockAlertItem struct {
-	ID                  string     `json:"id"`
-	TiendaID            string     `json:"tienda_id"`
-	CodigoBarras        *string    `json:"codigo_barras"`
-	SKU                 *string    `json:"sku"`
-	Descripcion         string     `json:"descripcion"`
-	StockActual         float64    `json:"stock_actual"`
-	StockMinimo         float64    `json:"stock_minimo"`
-	VentasUltimos30Dias float64    `json:"ventas_ultimos_30dias"`
-	VelocidadDiaria     float64    `json:"velocidad_diaria"`
-	DiasRestantes       float64    `json:"dias_restantes"`
-	NivelRiesgo         string     `json:"nivel_riesgo"` // CRITICO, ALTO, MODERADO
-	UltimaVentaAt       *time.Time `json:"ultima_venta_at"`
+	ID                    string     `json:"id"`
+	TiendaID              string     `json:"tienda_id"`
+	CodigoBarras          *string    `json:"codigo_barras"`
+	SKU                   *string    `json:"sku"`
+	Descripcion           string     `json:"descripcion"`
+	StockActual           float64    `json:"stock_actual"`
+	StockMinimo           float64    `json:"stock_minimo"`
+	VentasUltimos30Dias   float64    `json:"ventas_ultimos_30dias"`
+	TotalUnidadesVendidas float64    `json:"total_unidades_vendidas"`
+	VelocidadDiaria       float64    `json:"velocidad_diaria"`
+	DiasRestantes         float64    `json:"dias_restantes"`
+	NivelRiesgo           string     `json:"nivel_riesgo"` // CRITICO, ALTO, MODERADO
+	UltimaVentaAt         *time.Time `json:"ultima_venta_at"`
+	Ubicacion             *string    `json:"ubicacion,omitempty"`
+	CodigoEquivalencia    *string    `json:"codigo_equivalencia,omitempty"`
 }
 
 // VelocityItem consolida el catálogo para ordenamiento por rotación comercial

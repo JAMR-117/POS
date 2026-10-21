@@ -56,3 +56,25 @@ func (h *Handler) SyncBatchHandler(w http.ResponseWriter, r *http.Request) {
 
 	_ = json.NewEncoder(w).Encode(resp)
 }
+
+// PullHandler retorna el catálogo consolidado de productos y clientes desde PostgreSQL (o localStore)
+func (h *Handler) PullHandler(w http.ResponseWriter, r *http.Request) {
+	tiendaID := r.URL.Query().Get("tienda_id")
+	if tiendaID == "" {
+		tiendaID = "8377312b-9a2a-4d0f-b74d-f2e0ca6c4d2a"
+	}
+
+	data, err := h.service.PullUpdates(r.Context(), tiendaID)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(data)
+}

@@ -37,6 +37,9 @@ class StockAlertItem {
   final double diasRestantes;       // Runway proyectado
   final RiskLevel nivelRiesgo;
   final DateTime? ultimaVentaAt;
+  final double totalUnidadesVendidas;
+  final String? ubicacion;
+  final String? codigoEquivalencia;
 
   const StockAlertItem({
     required this.id,
@@ -51,6 +54,9 @@ class StockAlertItem {
     required this.diasRestantes,
     required this.nivelRiesgo,
     this.ultimaVentaAt,
+    this.totalUnidadesVendidas = 0.0,
+    this.ubicacion,
+    this.codigoEquivalencia,
   });
 
   factory StockAlertItem.fromJson(Map<String, dynamic> json) {
@@ -69,6 +75,9 @@ class StockAlertItem {
       ultimaVentaAt: json['ultima_venta_at'] != null
           ? DateTime.tryParse(json['ultima_venta_at'] as String)
           : null,
+      totalUnidadesVendidas: (json['total_unidades_vendidas'] as num?)?.toDouble() ?? 0.0,
+      ubicacion: json['ubicacion'] as String?,
+      codigoEquivalencia: json['codigo_equivalencia'] as String?,
     );
   }
 }

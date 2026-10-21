@@ -282,6 +282,169 @@ class ProductRepository {
     return results.map((r) => r['nombre'] as String).toList();
   }
 
+  /// Retorna listado de ubicaciones/gavetas únicas configuradas en el catálogo
+  Future<List<String>> getDistinctLocations() async {
+    final db = await _dbHelper.database;
+    final results = await db.rawQuery(
+      "SELECT DISTINCT ubicacion FROM productos WHERE ubicacion IS NOT NULL AND TRIM(ubicacion) != '' ORDER BY ubicacion ASC;",
+    );
+    return results.map((r) => r['ubicacion'] as String).toList();
+  }
+
+  /// Registra una recepción de mercancía (Entrada masiva de compras)
+  Future<void> recordGoodsReceipt(List<Map<String, dynamic>> items, {String usuarioId = 'cajero'}) async {
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+
+    await db.transaction((txn) async {
+      for (final item in items) {
+        final String prodId = item['producto_id'];
+        final double qty = (item['cantidad'] as num).toDouble();
+        final double cost = (item['precio_compra'] as num).toDouble();
+        final double? newSalePrice = item['precio_venta'] != null ? (item['precio_venta'] as num).toDouble() : null;
+
+        final rows = await txn.query('productos', where: 'id = ?', whereArgs: [prodId]);
+        if (rows.isEmpty) continue;
+        final currentProd = Product.fromMap(rows.first);
+        final double currentStock = currentProd.stockActual;
+        final double newStock = currentStock + qty;
+
+        final updateMap = <String, dynamic>{
+          'stock_actual': newStock,
+          'precio_compra': cost,
+          'updated_at': isoNow,
+        };
+        if (newSalePrice != null && newSalePrice > 0) {
+          updateMap['precio_venta'] = newSalePrice;
+        }
+
+        await txn.update('productos', updateMap, where: 'id = ?', whereArgs: [prodId]);
+
+        await _dbHelper.logInventoryMovement(
+          db: txn,
+          productoId: prodId,
+          productoDesc: currentProd.nombre.isNotEmpty ? currentProd.nombre : currentProd.descripcion,
+          tipo: 'ENTRADA',
+          cantidad: qty,
+          stockAnterior: currentStock,
+          stockNuevo: newStock,
+          usuarioId: usuarioId,
+          departamento: currentProd.departamento,
+          motivo: 'Recepción de pedido / Compra a proveedor',
+        );
+
+        final updatedProd = currentProd.copyWith(
+          stockActual: newStock,
+          precioCompra: cost,
+          precioVenta: newSalePrice ?? currentProd.precioVenta,
+        );
+        await txn.insert('sync_queue', {
+          'id': 'RECEIPT_${prodId}_${DateTime.now().millisecondsSinceEpoch}',
+          'event_type': 'PRODUCTO_MODIFICADO',
+          'payload': jsonEncode(updatedProd.toMap()),
+          'sync_status': 'pending',
+          'created_at': isoNow,
+        });
+      }
+    });
+  }
+
+  /// Entrada rápida de stock desde el Inspector
+  Future<void> quickStockEntry(String productoId, double qty, {String usuarioId = 'cajero', String? motivo}) async {
+    if (qty <= 0) return;
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    await db.transaction((txn) async {
+      final rows = await txn.query('productos', where: 'id = ?', whereArgs: [productoId]);
+      if (rows.isEmpty) return;
+      final currentProd = Product.fromMap(rows.first);
+      final double currentStock = currentProd.stockActual;
+      final double newStock = currentStock + qty;
+
+      await txn.update('productos', {'stock_actual': newStock, 'updated_at': isoNow}, where: 'id = ?', whereArgs: [productoId]);
+
+      await _dbHelper.logInventoryMovement(
+        db: txn,
+        productoId: productoId,
+        productoDesc: currentProd.nombre.isNotEmpty ? currentProd.nombre : currentProd.descripcion,
+        tipo: 'ENTRADA',
+        cantidad: qty,
+        stockAnterior: currentStock,
+        stockNuevo: newStock,
+        usuarioId: usuarioId,
+        departamento: currentProd.departamento,
+        motivo: motivo ?? 'Entrada rápida de stock',
+      );
+
+      final updatedProd = currentProd.copyWith(stockActual: newStock);
+      await txn.insert('sync_queue', {
+        'id': 'QUICK_${productoId}_${DateTime.now().millisecondsSinceEpoch}',
+        'event_type': 'PRODUCTO_MODIFICADO',
+        'payload': jsonEncode(updatedProd.toMap()),
+        'sync_status': 'pending',
+        'created_at': isoNow,
+      });
+    });
+  }
+
+  /// Aplica ajustes de auditoría física por gaveta o departamento
+  Future<int> applyAuditAdjustments(List<Map<String, dynamic>> adjustments, {String usuarioId = 'cajero'}) async {
+    final db = await _dbHelper.database;
+    final isoNow = DateTime.now().toUtc().toIso8601String();
+    int adjustedCount = 0;
+
+    await db.transaction((txn) async {
+      for (final adj in adjustments) {
+        final String prodId = adj['producto_id'];
+        final double physicalCount = (adj['conteo_fisico'] as num).toDouble();
+
+        final rows = await txn.query('productos', where: 'id = ?', whereArgs: [prodId]);
+        if (rows.isEmpty) continue;
+        final currentProd = Product.fromMap(rows.first);
+        final double currentStock = currentProd.stockActual;
+        final double diff = physicalCount - currentStock;
+
+        if (diff == 0) continue;
+
+        await txn.update('productos', {'stock_actual': physicalCount, 'updated_at': isoNow}, where: 'id = ?', whereArgs: [prodId]);
+
+        await _dbHelper.logInventoryMovement(
+          db: txn,
+          productoId: prodId,
+          productoDesc: currentProd.nombre.isNotEmpty ? currentProd.nombre : currentProd.descripcion,
+          tipo: 'AJUSTE',
+          cantidad: diff.abs(),
+          stockAnterior: currentStock,
+          stockNuevo: physicalCount,
+          usuarioId: usuarioId,
+          departamento: currentProd.departamento,
+          motivo: adj['motivo'] ?? 'Ajuste de inventario físico por gaveta (${currentProd.ubicacion ?? "Sin Ubicación"})',
+        );
+
+        await txn.insert('sync_queue', {
+          'id': 'AUDIT_${prodId}_${DateTime.now().millisecondsSinceEpoch}',
+          'event_type': 'AJUSTE_INVENTARIO',
+          'payload': jsonEncode({
+            'ajuste_id': 'ADJ_${DateTime.now().millisecondsSinceEpoch}',
+            'producto_id': prodId,
+            'stock_teorico': currentStock,
+            'stock_fisico': physicalCount,
+            'diferencia': diff,
+            'motivo': 'Auditoría por gaveta',
+            'autorizado_por': usuarioId,
+            'fecha_ajuste': isoNow,
+          }),
+          'sync_status': 'pending',
+          'created_at': isoNow,
+        });
+
+        adjustedCount++;
+      }
+    });
+
+    return adjustedCount;
+  }
+
   String _generateLocalUUID() {
     final random = Random.secure();
     return List.generate(16, (i) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();

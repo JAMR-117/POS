@@ -23,6 +23,7 @@ class CartController extends ChangeNotifier {
   String _selectedClientId = 'PUBLICO-GRAL';
   String _selectedClientName = 'Público en General';
   String _selectedClientTier = 'Público'; // 'Público', 'Cerrajero', 'Taller'
+  String _currentGlobalTier = 'Público';
 
   SalesRepository get salesRepository => _salesRepository;
 
@@ -35,7 +36,52 @@ class CartController extends ChangeNotifier {
   String get selectedClientId => _selectedClientId;
   String get selectedClientName => _selectedClientName;
   String get selectedClientTier => _selectedClientTier;
+  String get currentGlobalTier => _currentGlobalTier;
   int get heldSalesCount => _heldSales.length;
+
+  Product? getProductFromCache(String id) => _productCache[id];
+
+  void cacheProduct(Product product) {
+    _productCache[product.id] = product;
+  }
+
+  /// Obtiene el stock físico o capacidad efectiva disponible para un producto o servicio.
+  Future<double> getEffectiveStockForProduct(Product product) async {
+    _productCache[product.id] = product;
+    if (product.esServicio) {
+      if (product.insumoVinculadoId == null || product.insumoVinculadoId!.trim().isEmpty) {
+        return double.infinity;
+      }
+      final insumoId = product.insumoVinculadoId!.trim();
+      Product? insumo = _productCache[insumoId];
+      if (insumo == null) {
+        insumo = await _salesRepository.findProductById(insumoId);
+        if (insumo != null) _productCache[insumoId] = insumo;
+      }
+      if (insumo != null) {
+        final cantInsumo = (product.cantidadInsumo > 0)
+            ? product.cantidadInsumo
+            : 1.0;
+        return insumo.stockActual / cantInsumo;
+      }
+      return double.infinity;
+    }
+    return product.stockActual;
+  }
+
+  /// Retorna la cantidad ya apartada en el carrito para un producto o insumo vinculado.
+  double getReservedQuantityInCart(String productId) {
+    double total = 0.0;
+    for (final item in _items) {
+      if (item.productoId == productId) {
+        total += item.cantidad;
+      } else if (item.esServicio && item.insumoVinculadoId == productId) {
+        final factor = (item.cantidadInsumo > 0) ? item.cantidadInsumo : 1.0;
+        total += item.cantidad * factor;
+      }
+    }
+    return total;
+  }
 
   void setClient(String id, String name, {String tier = 'Público'}) {
     _selectedClientId = id;
@@ -184,6 +230,69 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Aplica un nivel de precio global a todos los productos del ticket con fallback estricto a precio público
+  void applyGlobalPriceTier(String tierLabel) {
+    _currentGlobalTier = tierLabel;
+
+    for (int i = 0; i < _items.length; i++) {
+      final current = _items[i];
+      final product = _productCache[current.productoId];
+
+      double applicablePrice = current.precioHistorico;
+      String appliedLabel = 'Público';
+
+      if (product != null) {
+        if (tierLabel == 'Cerrajero') {
+          if (product.precioCerrajero != null && product.precioCerrajero! > 0) {
+            applicablePrice = product.precioCerrajero!;
+            appliedLabel = 'Cerrajero';
+          } else {
+            applicablePrice = product.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else if (tierLabel == 'Taller') {
+          if (product.precioTaller != null && product.precioTaller! > 0) {
+            applicablePrice = product.precioTaller!;
+            appliedLabel = 'Taller';
+          } else {
+            applicablePrice = product.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else if (tierLabel == 'Mayoreo') {
+          if (product.precioMayoreo != null && product.precioMayoreo! > 0) {
+            applicablePrice = product.precioMayoreo!;
+            appliedLabel = 'Mayoreo';
+          } else {
+            applicablePrice = product.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else {
+          // 'Público' o por defecto
+          applicablePrice = product.precioVenta;
+          appliedLabel = 'Público';
+        }
+      } else {
+        if (tierLabel == 'Público') {
+          appliedLabel = 'Público';
+        }
+      }
+
+      final double totalLinea = _calculateLineTotal(
+        current.cantidad,
+        applicablePrice,
+        current.descuentoLinea,
+      );
+
+      _items[i] = current.copyWith(
+        precioHistorico: applicablePrice,
+        etiquetaPrecio: appliedLabel,
+        totalLinea: _roundToDecimals(totalLinea, 2),
+      );
+    }
+
+    notifyListeners();
+  }
+
   /// Actualiza la cantidad exacta y recalcula mayoreo
   void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
@@ -307,6 +416,7 @@ class CartController extends ChangeNotifier {
     _selectedClientId = 'PUBLICO-GRAL';
     _selectedClientName = 'Público en General';
     _selectedClientTier = 'Público';
+    _currentGlobalTier = 'Público';
     _clearError();
     notifyListeners();
   }
@@ -323,7 +433,7 @@ class CartController extends ChangeNotifier {
     try {
       final exactMatch = await _salesRepository.findProductByBarcodeOrSku(cleanInput);
       if (exactMatch != null) {
-        addProduct(exactMatch, quantity: defaultWeight);
+        _productCache[exactMatch.id] = exactMatch;
         _setLoading(false);
         return [exactMatch];
       }
@@ -458,7 +568,8 @@ class CartController extends ChangeNotifier {
     final values = List<int>.generate(16, (i) => random.nextInt(256));
     values[6] = (values[6] & 0x0f) | 0x40;
     values[8] = (values[8] & 0x3f) | 0x80;
-    return values.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    final hex = values.map((b) => b.toRadixString(16).padLeft(2, '0')).toList();
+    return '${hex.sublist(0, 4).join()}-${hex.sublist(4, 6).join()}-${hex.sublist(6, 8).join()}-${hex.sublist(8, 10).join()}-${hex.sublist(10, 16).join()}';
   }
 
   void _setLoading(bool value) {

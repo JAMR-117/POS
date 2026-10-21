@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:csv/csv.dart';
 import 'database_seeder.dart';
 import 'models.dart';
 
@@ -43,6 +45,8 @@ class DatabaseHelper {
   Future<void> _onOpen(Database db) async {
     // Garantiza que los registros semilla permanentes siempre existan
     await DatabaseSeeder.seed(db);
+    // Auto-bootstrap silencioso de catálogo migrado y clientes
+    await _autoBootstrapData(db);
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -292,8 +296,158 @@ class DatabaseHelper {
 
     await db.execute('CREATE INDEX IF NOT EXISTS idx_mov_inv_prod ON movimientos_inventario(producto_id);');
     await db.execute('CREATE INDEX IF NOT EXISTS idx_mov_inv_fecha ON movimientos_inventario(fecha);');
+  }
 
-    await DatabaseSeeder.seed(db);
+  /// Auto-importación silenciosa en segundo plano si el catálogo o clientes están vacíos
+  Future<void> _autoBootstrapData(Database db) async {
+    try {
+      // 1. Columnas de analítica y métricas predictivas
+      try {
+        await db.execute('ALTER TABLE productos ADD COLUMN ventas_ultimos_30dias REAL DEFAULT 0.0;');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE productos ADD COLUMN total_unidades_vendidas REAL DEFAULT 0.0;');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE productos ADD COLUMN ultima_venta_at TEXT;');
+      } catch (_) {}
+
+      // 2. Auto-bootstrap de productos desde assets
+      final pCount = Sqflite.firstIntValue(await db.rawQuery(
+        "SELECT COUNT(*) FROM productos WHERE id != 'ART-COMUN';",
+      )) ?? 0;
+
+      if (pCount == 0) {
+        final csvString = await rootBundle.loadString('assets/catalogo_migrado_pos.csv');
+        if (csvString.isNotEmpty) {
+          final rows = const CsvToListConverter(eol: '\n', fieldDelimiter: ',', shouldParseNumbers: false).convert(csvString);
+          if (rows.length > 1) {
+            final header = rows.first.map((e) => e.toString().toLowerCase().trim()).toList();
+            final colCodigo = header.indexOf('codigo');
+            final colSku = header.indexOf('sku');
+            final colNombre = header.indexOf('nombre');
+            final colDesc = header.indexOf('descripcion');
+            final colMarca = header.indexOf('marca');
+            final colMolde = header.indexOf('codigo_equivalencia');
+            final colUbi = header.indexOf('ubicacion');
+            final colDepto = header.indexOf('departamento');
+            final colPC = header.indexOf('precio_compra');
+            final colPV = header.indexOf('precio_venta');
+            final colPCerrajero = header.indexOf('precio_cerrajero');
+            final colPTaller = header.indexOf('precio_taller');
+            final colPMayoreo = header.indexOf('precio_mayoreo');
+            final colCantMayoreo = header.indexOf('cantidad_mayoreo');
+            final colStock = header.indexOf('stock_actual');
+            final colStockMin = header.indexOf('stock_minimo');
+            final colGranel = header.indexOf('es_a_granel');
+            final colServicio = header.indexOf('es_servicio');
+            final colV30d = header.indexOf('ventas_ultimos_30dias');
+            final colTotVendidas = header.indexOf('total_unidades_vendidas');
+            final colUltVenta = header.indexOf('ultima_venta_at');
+
+            final isoNow = DateTime.now().toUtc().toIso8601String();
+            final batch = db.batch();
+
+            for (int i = 1; i < rows.length; i++) {
+              final r = rows[i];
+              if (r.isEmpty) continue;
+              final cod = colCodigo != -1 && r.length > colCodigo ? r[colCodigo]?.toString().trim() : '';
+              final sku = colSku != -1 && r.length > colSku ? r[colSku]?.toString().trim() : cod;
+              if (cod == null || cod.isEmpty) continue;
+
+              final id = cod;
+              final desc = colDesc != -1 && r.length > colDesc ? r[colDesc]?.toString().trim() : 'Producto';
+              final nombre = colNombre != -1 && r.length > colNombre ? r[colNombre]?.toString().trim() : desc;
+
+              batch.insert(
+                'productos',
+                {
+                  'id': id,
+                  'codigo_barras': cod,
+                  'sku': sku,
+                  'nombre': (nombre != null && nombre.isNotEmpty) ? nombre : desc,
+                  'descripcion': (desc != null && desc.isNotEmpty) ? desc : nombre,
+                  'marca': colMarca != -1 && r.length > colMarca ? r[colMarca]?.toString() : 'Genérica',
+                  'codigo_equivalencia': colMolde != -1 && r.length > colMolde ? r[colMolde]?.toString() : null,
+                  'ubicacion': colUbi != -1 && r.length > colUbi ? r[colUbi]?.toString() : null,
+                  'departamento': colDepto != -1 && r.length > colDepto ? r[colDepto]?.toString() : 'General',
+                  'precio_compra': colPC != -1 && r.length > colPC ? (num.tryParse(r[colPC].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'precio_venta': colPV != -1 && r.length > colPV ? (num.tryParse(r[colPV].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'precio_cerrajero': colPCerrajero != -1 && r.length > colPCerrajero ? num.tryParse(r[colPCerrajero].toString())?.toDouble() : null,
+                  'precio_taller': colPTaller != -1 && r.length > colPTaller ? num.tryParse(r[colPTaller].toString())?.toDouble() : null,
+                  'precio_mayoreo': colPMayoreo != -1 && r.length > colPMayoreo ? num.tryParse(r[colPMayoreo].toString())?.toDouble() : null,
+                  'cantidad_mayoreo': colCantMayoreo != -1 && r.length > colCantMayoreo ? num.tryParse(r[colCantMayoreo].toString())?.toDouble() : null,
+                  'stock_actual': colStock != -1 && r.length > colStock ? (num.tryParse(r[colStock].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'stock_minimo': colStockMin != -1 && r.length > colStockMin ? (num.tryParse(r[colStockMin].toString())?.toDouble() ?? 5.0) : 5.0,
+                  'es_a_granel': colGranel != -1 && r.length > colGranel ? (int.tryParse(r[colGranel].toString()) ?? 0) : 0,
+                  'es_servicio': colServicio != -1 && r.length > colServicio ? (int.tryParse(r[colServicio].toString()) ?? 0) : 0,
+                  'ventas_ultimos_30dias': colV30d != -1 && r.length > colV30d ? (num.tryParse(r[colV30d].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'total_unidades_vendidas': colTotVendidas != -1 && r.length > colTotVendidas ? (num.tryParse(r[colTotVendidas].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'ultima_venta_at': colUltVenta != -1 && r.length > colUltVenta ? r[colUltVenta]?.toString() : null,
+                  'created_at': isoNow,
+                  'updated_at': isoNow,
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+            }
+            await batch.commit(noResult: true);
+          }
+        }
+      }
+
+      // 3. Auto-bootstrap de clientes desde assets
+      final cCount = Sqflite.firstIntValue(await db.rawQuery(
+        "SELECT COUNT(*) FROM clientes WHERE id NOT IN ('PUBLICO-GRAL', 'cli-cerrajero-juan', 'cli-taller-automotriz');",
+      )) ?? 0;
+
+      if (cCount == 0) {
+        final csvString = await rootBundle.loadString('assets/clientes_migrados_pos.csv');
+        if (csvString.isNotEmpty) {
+          final rows = const CsvToListConverter(eol: '\n', fieldDelimiter: ',', shouldParseNumbers: false).convert(csvString);
+          if (rows.length > 1) {
+            final header = rows.first.map((e) => e.toString().toLowerCase().trim()).toList();
+            final colId = header.indexOf('id');
+            final colNombre = header.indexOf('nombre');
+            final colTel = header.indexOf('telefono');
+            final colEmail = header.indexOf('email');
+            final colDir = header.indexOf('direccion');
+            final colLimite = header.indexOf('limite_credito');
+            final colSaldo = header.indexOf('saldo_actual');
+
+            final isoNow = DateTime.now().toUtc().toIso8601String();
+            final batch = db.batch();
+
+            for (int i = 1; i < rows.length; i++) {
+              final r = rows[i];
+              if (r.isEmpty) continue;
+              final cid = colId != -1 && r.length > colId ? r[colId]?.toString().trim() : '';
+              final nom = colNombre != -1 && r.length > colNombre ? r[colNombre]?.toString().trim() : '';
+              if (cid == null || cid.isEmpty || nom == null || nom.isEmpty) continue;
+
+              batch.insert(
+                'clientes',
+                {
+                  'id': cid,
+                  'nombre': nom,
+                  'telefono': colTel != -1 && r.length > colTel ? r[colTel]?.toString() : null,
+                  'correo': colEmail != -1 && r.length > colEmail ? r[colEmail]?.toString() : null,
+                  'direccion': colDir != -1 && r.length > colDir ? r[colDir]?.toString() : null,
+                  'limite_credito': colLimite != -1 && r.length > colLimite ? (num.tryParse(r[colLimite].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'saldo_deudor': colSaldo != -1 && r.length > colSaldo ? (num.tryParse(r[colSaldo].toString())?.toDouble() ?? 0.0) : 0.0,
+                  'activo': 1,
+                  'tarifa_preferencial': 'Público',
+                  'created_at': isoNow,
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+            }
+            await batch.commit(noResult: true);
+          }
+        }
+      }
+    } catch (_) {
+      // Ignorar fallos de bootstrap si assets no están presentes en pruebas
+    }
   }
 
   // Kardex de Inventario

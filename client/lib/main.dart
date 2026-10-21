@@ -13,7 +13,6 @@ import 'data/sync/sync_api_client.dart';
 import 'data/sync/sync_worker.dart';
 import 'data/inventory/inventory_api_client.dart';
 import 'data/hardware/printer_service.dart';
-import 'data/hardware/esc_pos_ticket_builder.dart';
 
 // Controladores Reactivos
 import 'presentation/controllers/cart_controller.dart';
@@ -49,15 +48,8 @@ void main() async {
   // 5. Módulo de Analítica e Inventario Predictivo (BI)
   final inventoryApiClient = InventoryApiClient(baseUrl: 'http://127.0.0.1:8080');
 
-  // 6. Servicio de Impresión Térmica (deshabilitado para web)
-  final printerService = PrinterService(
-    config: const PrinterConfig(
-      type: PrinterConnectionType.disabled,
-      address: '127.0.0.1',
-      port: 9100,
-      paperSize: PaperSize.mm80,
-    ),
-  );
+  // 6. Servicio de Impresión Térmica ESC/POS (Carga persistente de Windows Spooler / Red)
+  final printerService = PrinterService();
 
   // 7. Controladores de Estado
   final cartController = CartController(salesRepository: salesRepo);

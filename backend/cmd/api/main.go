@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"pos-backend/internal/inventory"
+	"pos-backend/internal/printer"
 	"pos-backend/internal/store"
 	"pos-backend/internal/sync"
 
@@ -140,9 +141,14 @@ func main() {
 	syncService := sync.NewService(dbPool, localStore)
 	syncHandler := sync.NewHandler(syncService)
 
+	// Auto-siembra de catálogo y clientes migrados desde el segundo 1
+	_ = sync.SeedMigrationData(rootCtx, dbPool, localStore)
+
 	inventoryRepo := inventory.NewRepository(dbPool, localStore)
 	inventoryService := inventory.NewService(inventoryRepo)
 	inventoryHandler := inventory.NewHandler(inventoryService)
+
+	printerHandler := printer.NewHandler()
 
 	// 4. Router Chi y Middlewares
 	r := chi.NewRouter()
@@ -180,14 +186,19 @@ func main() {
 
 	// Endpoints API v1
 	r.Route("/api/v1", func(r chi.Router) {
-		// Receptor de cola de mutaciones Offline-First
+		// Receptor de cola de mutaciones Offline-First y Descarga Bidireccional
 		r.Post("/sync", syncHandler.SyncBatchHandler)
+		r.Get("/sync/pull", syncHandler.PullHandler)
 
 		// Rutas BI de Inventario y Analítica
 		r.Route("/inventory", func(r chi.Router) {
 			r.Get("/alerts", inventoryHandler.AlertsHandler)
 			r.Get("/velocity", inventoryHandler.VelocityHandler)
 		})
+
+		// Rutas de Impresión Térmica Física (Puente Local / Network)
+		r.Get("/printers", printerHandler.GetPrinters)
+		r.Post("/print", printerHandler.Print)
 	})
 
 	// 5. Servidor HTTP y Apagado Controlado

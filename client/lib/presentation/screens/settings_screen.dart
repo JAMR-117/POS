@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../data/local/database_helper.dart';
+import '../../data/hardware/printer_service.dart';
+import '../../data/hardware/esc_pos_ticket_builder.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final PrinterService? printerService;
+
+  const SettingsScreen({super.key, this.printerService});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -20,12 +24,21 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
   final TextEditingController _businessAddressCtrl = TextEditingController();
   final TextEditingController _businessSloganCtrl = TextEditingController();
 
-  // 2. Configuración del Ticket Térmico
+  // 2. Configuración del Ticket Térmico y Hardware
   final TextEditingController _ticketHeaderCtrl = TextEditingController();
   final TextEditingController _ticketFooterCtrl = TextEditingController();
   String _paperWidth = '80mm'; // '58mm' o '80mm'
   bool _ticketPrintTax = false;
   bool _ticketAutoDrawer = true;
+
+  // Hardware de Impresión Física (Puente Go / Red / Spooler)
+  PrinterConnectionType _printerType = PrinterConnectionType.windowsSpooler;
+  String _selectedPrinterName = '';
+  final TextEditingController _printerAddressCtrl = TextEditingController(text: '192.168.1.200');
+  final TextEditingController _printerPortCtrl = TextEditingController(text: '9100');
+  List<String> _detectedPrinters = [];
+  bool _isDetectingPrinters = false;
+  bool _isTestingPrinter = false;
 
   // 3. Matriz de Permisos para Cajeros (Eleventa Cajeros.png Style)
   bool _permisoDescuentos = false;
@@ -60,6 +73,8 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     _businessSloganCtrl.dispose();
     _ticketHeaderCtrl.dispose();
     _ticketFooterCtrl.dispose();
+    _printerAddressCtrl.dispose();
+    _printerPortCtrl.dispose();
     _cfdiRegimenCtrl.dispose();
     _cfdiLugarExpedicionCtrl.dispose();
     _cfdiSerieCtrl.dispose();
@@ -97,6 +112,15 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     _cfdiSerieCtrl.text = config['cfdi_serie'] ?? 'A';
     _cfdiFolioCtrl.text = config['cfdi_folio'] ?? '1';
 
+    if (widget.printerService != null) {
+      final pCfg = widget.printerService!.config;
+      _printerType = pCfg.type;
+      _selectedPrinterName = pCfg.printerName;
+      _printerAddressCtrl.text = pCfg.address;
+      _printerPortCtrl.text = pCfg.port.toString();
+      _paperWidth = pCfg.paperSize == PaperSize.mm58 ? '58mm' : '80mm';
+    }
+
     if (mounted) setState(() => _isLoading = false);
   }
 
@@ -128,6 +152,17 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     await _dbHelper.setConfig('cfdi_lugar_expedicion', _cfdiLugarExpedicionCtrl.text.trim());
     await _dbHelper.setConfig('cfdi_serie', _cfdiSerieCtrl.text.trim());
     await _dbHelper.setConfig('cfdi_folio', _cfdiFolioCtrl.text.trim());
+
+    if (widget.printerService != null) {
+      final newCfg = PrinterConfig(
+        type: _printerType,
+        printerName: _selectedPrinterName,
+        address: _printerAddressCtrl.text.trim(),
+        port: int.tryParse(_printerPortCtrl.text.trim()) ?? 9100,
+        paperSize: _paperWidth == '58mm' ? PaperSize.mm58 : PaperSize.mm80,
+      );
+      await widget.printerService!.saveConfig(newCfg);
+    }
 
     if (mounted) {
       setState(() => _isLoading = false);
@@ -249,10 +284,231 @@ class _SettingsScreenState extends State<SettingsScreen> with SingleTickerProvid
     );
   }
 
+  Future<void> _detectWindowsPrinters() async {
+    setState(() => _isDetectingPrinters = true);
+    try {
+      final list = await (widget.printerService?.fetchInstalledPrinters() ?? Future.value(<String>[]));
+      setState(() {
+        _detectedPrinters = List<String>.from(list);
+        if (_detectedPrinters.isNotEmpty && (_selectedPrinterName.isEmpty || !_detectedPrinters.contains(_selectedPrinterName))) {
+          _selectedPrinterName = _detectedPrinters.first;
+        }
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Se detectaron ${_detectedPrinters.length} impresoras en Windows.'),
+            backgroundColor: const Color(0xFF1F4E79),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error detectando impresoras: $e'), backgroundColor: Colors.red),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isDetectingPrinters = false);
+    }
+  }
+
+  Future<void> _testPrint() async {
+    setState(() => _isTestingPrinter = true);
+    try {
+      final tempCfg = PrinterConfig(
+        type: _printerType,
+        printerName: _selectedPrinterName,
+        address: _printerAddressCtrl.text.trim(),
+        port: int.tryParse(_printerPortCtrl.text.trim()) ?? 9100,
+        paperSize: _paperWidth == '58mm' ? PaperSize.mm58 : PaperSize.mm80,
+      );
+      await widget.printerService?.saveConfig(tempCfg);
+      final res = await (widget.printerService?.printTestPage() ??
+          Future.value(const PrintResult(success: false, message: 'Servicio de impresión no disponible.')));
+      if (mounted) {
+        if (res.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res.message), backgroundColor: const Color(0xFF2E7D32)),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res.message), backgroundColor: Colors.red.shade700),
+          );
+          if (res.plainTextTicket != null) {
+            PrinterService.showThermalPreviewDialog(
+              context,
+              res.plainTextTicket!,
+              onPrintDirect: _testPrint,
+            );
+          }
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _isTestingPrinter = false);
+    }
+  }
+
   Widget _buildTicketConfigTab() {
     return ListView(
       padding: const EdgeInsets.all(24.0),
       children: [
+        // 1. Tarjeta de Hardware e Impresora Física
+        Card(
+          elevation: 2,
+          margin: const EdgeInsets.only(bottom: 20),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.print, color: Color(0xFF1F4E79), size: 22),
+                    SizedBox(width: 8),
+                    Text(
+                      'HARDWARE DE IMPRESIÓN FÍSICA (TÉRMICA ESC/POS)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1F4E79)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text('Tipo de Conexión:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<PrinterConnectionType>(
+                  initialValue: _printerType,
+                  isExpanded: true,
+                  decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                  items: const [
+                    DropdownMenuItem(
+                      value: PrinterConnectionType.windowsSpooler,
+                      child: Text('🖨️ Impresora Térmica USB de Windows (Vía Puente Backend Local)'),
+                    ),
+                    DropdownMenuItem(
+                      value: PrinterConnectionType.network,
+                      child: Text('🌐 Impresora de Red Ethernet / Wi-Fi (Socket TCP Raw 9100)'),
+                    ),
+                    DropdownMenuItem(
+                      value: PrinterConnectionType.systemDialog,
+                      child: Text('📄 Vista Previa Térmica / Diálogo del Sistema Operativo'),
+                    ),
+                    DropdownMenuItem(
+                      value: PrinterConnectionType.disabled,
+                      child: Text('🚫 Sin Impresora (Deshabilitada)'),
+                    ),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) setState(() => _printerType = val);
+                  },
+                ),
+                const SizedBox(height: 14),
+
+                // Configuración según tipo
+                if (_printerType == PrinterConnectionType.windowsSpooler) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Impresora de Windows Seleccionada:', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                            const SizedBox(height: 6),
+                            if (_detectedPrinters.isNotEmpty)
+                              DropdownButtonFormField<String>(
+                                initialValue: _detectedPrinters.contains(_selectedPrinterName) ? _selectedPrinterName : _detectedPrinters.first,
+                                isExpanded: true,
+                                decoration: const InputDecoration(border: OutlineInputBorder(), isDense: true),
+                                items: _detectedPrinters
+                                    .map((p) => DropdownMenuItem(value: p, child: Text(p, overflow: TextOverflow.ellipsis)))
+                                    .toList(),
+                                onChanged: (val) {
+                                  if (val != null) setState(() => _selectedPrinterName = val);
+                                },
+                              )
+                            else
+                              TextField(
+                                controller: TextEditingController(text: _selectedPrinterName),
+                                decoration: const InputDecoration(
+                                  labelText: 'Nombre de la Impresora',
+                                  hintText: 'Ej. POS-80, EPSON TM-T20, etc.',
+                                  border: OutlineInputBorder(),
+                                  isDense: true,
+                                ),
+                                onChanged: (val) => _selectedPrinterName = val.trim(),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1F4E79),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                        ),
+                        icon: _isDetectingPrinters
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.search, size: 18, color: Colors.white),
+                        label: const Text('🔍 Detectar Impresoras', style: TextStyle(color: Colors.white)),
+                        onPressed: _isDetectingPrinters ? null : _detectWindowsPrinters,
+                      ),
+                    ],
+                  ),
+                ] else if (_printerType == PrinterConnectionType.network) ...[
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 3,
+                        child: TextField(
+                          controller: _printerAddressCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Dirección IP de la Impresora',
+                            hintText: '192.168.1.200',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 1,
+                        child: TextField(
+                          controller: _printerPortCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Puerto TCP',
+                            hintText: '9100',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+                // Botón de prueba de impresión
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    ),
+                    icon: _isTestingPrinter
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.receipt, color: Colors.white, size: 18),
+                    label: const Text('🖨️ Imprimir Página de Prueba', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    onPressed: _isTestingPrinter ? null : _testPrint,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
         const Text('DISEÑO Y PARÁMETROS DEL TICKET DE VENTA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1F4E79))),
         const SizedBox(height: 16),
         Row(

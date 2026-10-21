@@ -148,7 +148,9 @@ class SalesRepository {
               stockNuevo: newInsumoStock,
               usuarioId: 'cajero',
               departamento: insumoDepto,
-              motivo: 'Consumo por servicio: $prodNombre (Folio ${sale.folioTicket ?? sale.ventaId})',
+              motivo: newInsumoStock < 0
+                  ? 'VENTA EN NEGATIVO (Sobregiro autorizado en caja) - Insumo de servicio $prodNombre (Folio ${sale.folioTicket ?? sale.ventaId})'
+                  : 'Consumo por servicio: $prodNombre (Folio ${sale.folioTicket ?? sale.ventaId})',
             );
 
             insumosDescontadosLog.add({
@@ -183,7 +185,9 @@ class SalesRepository {
               stockNuevo: newStock,
               usuarioId: 'cajero',
               departamento: depto,
-              motivo: 'Venta Folio ${sale.folioTicket ?? sale.ventaId}',
+              motivo: newStock < 0
+                  ? 'VENTA EN NEGATIVO (Sobregiro autorizado en caja) - Folio ${sale.folioTicket ?? sale.ventaId}'
+                  : 'Venta Folio ${sale.folioTicket ?? sale.ventaId}',
             );
           }
           // Si es servicio puro sin insumo vinculado (insumoId == null), no modifica inventario.
@@ -236,6 +240,20 @@ class SalesRepository {
   // ===========================================================================
   // 2. MOTOR DE BÚSQUEDA INTELIGENTE, COMODÍN % Y VARIANTES / EQUIVALENCIAS
   // ===========================================================================
+
+  Future<Product?> findProductById(String id) async {
+    final db = await _dbHelper.database;
+    final results = await db.query(
+      'productos',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (results.isNotEmpty) {
+      return Product.fromMap(results.first);
+    }
+    return null;
+  }
 
   Future<Product?> findProductByBarcodeOrSku(String code) async {
     final db = await _dbHelper.database;

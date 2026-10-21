@@ -1,0 +1,9 @@
+id,nombre,telefono,email,direccion,limite_credito,saldo_actual,ultimo_pago_at,notas
+CLI-0003,Colin,,,,4000.0,2519.5,2025-10-24 15:00:47,Migrado de Eleventa PDVDATA (Folio 1)
+CLI-0004,Toño,,,Pajarera,0.0,213.0,2026-08-22 14:11:16,Migrado de Eleventa PDVDATA (Folio 2)
+CLI-0005,Jose Luis,,,,0.0,30.0,2026-09-30 15:53:00,Migrado de Eleventa PDVDATA (Folio 3)
+CLI-0006,Jesus,,,Cucaracha,0.0,0.0,2026-02-02 13:08:23,Migrado de Eleventa PDVDATA (Folio 4)
+CLI-0007,Ivan Domingo,,,Tianguis,0.0,137.9,2026-04-04 11:31:37,Migrado de Eleventa PDVDATA (Folio 5)
+CLI-0008,Paco,,,,0.0,0.0,2026-06-20 10:48:04,Migrado de Eleventa PDVDATA (Folio 6)
+CLI-0009,Hilario,,,Neza,0.0,0.0,2026-09-04 11:16:15,Migrado de Eleventa PDVDATA (Folio 7)
+CLI-0010,MANUEL HDZ,5536797344,,MAGDALENA CONTRERAS,0.0,5000.0,2026-08-26 11:05:07,Migrado de Eleventa PDVDATA (Folio 8)

@@ -155,7 +155,15 @@ class AlertsController extends ChangeNotifier {
       final String? barcode = row['codigo_barras'] as String?;
       final String? sku = row['sku'] as String?;
 
-      final double ventas30d = sales30dMap[id] ?? 0.0;
+      final double baseVentas30d = (row['ventas_ultimos_30dias'] as num?)?.toDouble() ?? 0.0;
+      final double baseTotalVendidas = (row['total_unidades_vendidas'] as num?)?.toDouble() ?? 0.0;
+      final String? ubicacion = row['ubicacion'] as String?;
+      final String? molde = row['codigo_equivalencia'] as String?;
+
+      final double localVentas30d = sales30dMap[id] ?? 0.0;
+      final double ventas30d = baseVentas30d + localVentas30d;
+      final double totalVendidas = baseTotalVendidas + localVentas30d;
+
       final double velocidadDiaria = ventas30d / 30.0;
       final double diasRestantes = velocidadDiaria > 0.0
           ? (stockActual / velocidadDiaria)
@@ -189,16 +197,29 @@ class AlertsController extends ChangeNotifier {
             diasRestantes: diasRestantes,
             nivelRiesgo: nivel,
             ultimaVentaAt: lastSaleMap[id],
+            totalUnidadesVendidas: totalVendidas,
+            ubicacion: ubicacion,
+            codigoEquivalencia: molde,
           ),
         );
       }
     }
 
-    // Ordenar: primero agotados (stockActual <= 0), luego por nivel de riesgo y menor días restantes
+    // Ordenar estrictamente por popularidad comercial:
+    // ventas_ultimos_30dias DESC, total_unidades_vendidas DESC, stock_actual <= 0 primero, stock_actual ASC
     result.sort((a, b) {
-      if (a.stockActual <= 0 && b.stockActual > 0) return -1;
-      if (a.stockActual > 0 && b.stockActual <= 0) return 1;
-      return a.diasRestantes.compareTo(b.diasRestantes);
+      final cmp30d = b.ventasUltimos30Dias.compareTo(a.ventasUltimos30Dias);
+      if (cmp30d != 0) return cmp30d;
+
+      final cmpTot = b.totalUnidadesVendidas.compareTo(a.totalUnidadesVendidas);
+      if (cmpTot != 0) return cmpTot;
+
+      final aAgotado = a.stockActual <= 0 ? 0 : 1;
+      final bAgotado = b.stockActual <= 0 ? 0 : 1;
+      final cmpAgotado = aAgotado.compareTo(bAgotado);
+      if (cmpAgotado != 0) return cmpAgotado;
+
+      return a.stockActual.compareTo(b.stockActual);
     });
 
     return result;

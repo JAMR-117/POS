@@ -37,14 +37,19 @@ type SaleTotalsDTO struct {
 
 // SaleItemDTO mapea cada artículo vendido en el ticket
 type SaleItemDTO struct {
-	ID              string  `json:"id"`
-	ProductoID      string  `json:"producto_id"`
-	Descripcion     string  `json:"descripcion"`
-	Cantidad        float64 `json:"cantidad"` // Soporte decimal para venta a granel
-	PrecioHistorico float64 `json:"precio_historico"`
-	CostoHistorico  float64 `json:"costo_historico"`
-	DescuentoLinea  float64 `json:"descuento_linea"`
-	TotalLinea      float64 `json:"total_linea"`
+	ID                string  `json:"id"`
+	ProductoID        string  `json:"producto_id"`
+	Nombre            string  `json:"nombre,omitempty"`
+	Descripcion       string  `json:"descripcion"`
+	Cantidad          float64 `json:"cantidad"` // Soporte decimal para venta a granel
+	PrecioHistorico   float64 `json:"precio_historico"`
+	CostoHistorico    float64 `json:"costo_historico"`
+	DescuentoLinea    float64 `json:"descuento_linea"`
+	TotalLinea        float64 `json:"total_linea"`
+	EsServicio        int     `json:"es_servicio,omitempty"`
+	InsumoVinculadoID *string `json:"insumo_vinculado_id,omitempty"`
+	CantidadInsumo    float64 `json:"cantidad_insumo,omitempty"`
+	EtiquetaPrecio    string  `json:"etiqueta_precio,omitempty"`
 }
 
 // SalePayload representa el payload decodificado de eventos 'VENTA_REGISTRADA'
@@ -120,4 +125,54 @@ type CreditPaymentPayload struct {
 	ClienteID string    `json:"cliente_id"`
 	Monto     float64   `json:"monto"`
 	Fecha     time.Time `json:"fecha"`
+}
+
+// PullResponse estructura la respuesta del endpoint GET /api/v1/sync/pull
+type PullResponse struct {
+	Status        string           `json:"status"`
+	Timestamp     time.Time        `json:"timestamp"`
+	ProductsCount int              `json:"products_count"`
+	ClientsCount  int              `json:"clients_count"`
+	Products      []ProductPullDTO `json:"products"`
+	Clients       []ClientPullDTO  `json:"clients"`
+}
+
+type ProductPullDTO struct {
+	ID                    string     `json:"id"`
+	CodigoBarras          *string    `json:"codigo_barras"`
+	SKU                   *string    `json:"sku"`
+	Nombre                string     `json:"nombre"`
+	Descripcion           string     `json:"descripcion"`
+	Marca                 *string    `json:"marca"`
+	CodigoEquivalencia    *string    `json:"codigo_equivalencia"`
+	Ubicacion             *string    `json:"ubicacion"`
+	Departamento          string     `json:"departamento"`
+	PrecioCompra          float64    `json:"precio_compra"`
+	PrecioVenta           float64    `json:"precio_venta"`
+	PrecioCerrajero       *float64   `json:"precio_cerrajero"`
+	PrecioTaller          *float64   `json:"precio_taller"`
+	PrecioMayoreo         *float64   `json:"precio_mayoreo"`
+	CantidadMayoreo       *float64   `json:"cantidad_mayoreo"`
+	StockActual           float64    `json:"stock_actual"`
+	StockMinimo           float64    `json:"stock_minimo"`
+	EsAGranel             int        `json:"es_a_granel"`
+	EsServicio            int        `json:"es_servicio"`
+	InsumoVinculadoID     *string    `json:"insumo_vinculado_id"`
+	CantidadInsumo        float64    `json:"cantidad_insumo"`
+	VentasUltimos30Dias   float64    `json:"ventas_ultimos_30dias"`
+	TotalUnidadesVendidas float64    `json:"total_unidades_vendidas"`
+	UltimaVentaAt         *time.Time `json:"ultima_venta_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+}
+
+type ClientPullDTO struct {
+	ID            string    `json:"id"`
+	Nombre        string    `json:"nombre"`
+	Telefono      *string   `json:"telefono"`
+	Email         *string   `json:"email"`
+	Direccion     *string   `json:"direccion"`
+	LimiteCredito float64   `json:"limite_credito"`
+	SaldoDeudor   float64   `json:"saldo_deudor"`
+	NivelPrecio   string    `json:"nivel_precio"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }

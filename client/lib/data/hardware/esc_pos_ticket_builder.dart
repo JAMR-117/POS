@@ -206,4 +206,57 @@ class EscPosTicketBuilder {
     final s = dt.second.toString().padLeft(2, '0');
     return '$y-$m-$d $h:$min:$s';
   }
+
+  /// Genera representación de texto plano monoespaciado para previsualización térmica
+  String buildPlainText(TicketPrintData data) {
+    final sb = StringBuffer();
+    final width = paperSize.maxChars;
+
+    void addCentered(String text) {
+      if (text.length >= width) {
+        sb.writeln(text);
+      } else {
+        final pad = (width - text.length) ~/ 2;
+        sb.writeln('${' ' * pad}$text');
+      }
+    }
+
+    addCentered(data.negocioNombre);
+    if (data.rfc != null && data.rfc!.isNotEmpty) addCentered('RFC: ${data.rfc}');
+    if (data.direccion != null && data.direccion!.isNotEmpty) addCentered(data.direccion!);
+    if (data.telefono != null && data.telefono!.isNotEmpty) addCentered('TEL: ${data.telefono}');
+    sb.writeln('=' * width);
+
+    sb.writeln(_formatTwoColumns('FOLIO: ${data.folio}', _formatDate(data.fecha), width));
+    sb.writeln('CAJERO: ${data.cajero} | TURNO: ${data.turnoId}');
+    sb.writeln('-' * width);
+
+    sb.writeln(_formatTwoColumns('CANT  DESCRIPCION', 'TOTAL', width));
+    sb.writeln('-' * width);
+
+    for (final item in data.items) {
+      final name = item.nombre.length > (width - 14) ? item.nombre.substring(0, width - 14) : item.nombre;
+      sb.writeln(_formatTwoColumns('${item.cantidad}x $name', '\$${item.totalLinea.toStringAsFixed(2)}', width));
+      if (item.etiquetaPrecio.isNotEmpty && item.etiquetaPrecio != 'Público') {
+        sb.writeln('  [Nivel: ${item.etiquetaPrecio}]');
+      }
+    }
+
+    sb.writeln('-' * width);
+    sb.writeln(_formatTwoColumns('SUBTOTAL:', '\$${data.subtotal.toStringAsFixed(2)}', width));
+    if (data.descuentoTotal > 0) {
+      sb.writeln(_formatTwoColumns('DESCUENTO:', '-\$${data.descuentoTotal.toStringAsFixed(2)}', width));
+    }
+    sb.writeln(_formatTwoColumns('TOTAL:', '\$${data.total.toStringAsFixed(2)}', width));
+    sb.writeln('=' * width);
+
+    for (final p in data.pagos) {
+      sb.writeln(_formatTwoColumns('PAGO (${p.metodo.toUpperCase()}):', '\$${p.monto.toStringAsFixed(2)}', width));
+    }
+    sb.writeln(_formatTwoColumns('CAMBIO:', '\$${data.cambio.toStringAsFixed(2)}', width));
+    sb.writeln('=' * width);
+    addCentered(data.piePagina);
+
+    return sb.toString();
+  }
 }

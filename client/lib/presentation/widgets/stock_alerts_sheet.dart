@@ -141,74 +141,156 @@ class StockAlertsSheet extends StatelessWidget {
   }
 
   Widget _buildAlertTile(StockAlertItem item) {
+    final bool isAgotado = item.stockActual <= 0;
+    final bool isBajoMinimo = item.stockActual <= item.stockMinimo;
+    
     Color badgeColor;
     String badgeText;
-
-    switch (item.nivelRiesgo) {
-      case RiskLevel.critico:
-        badgeColor = const Color(0xFFD32F2F);
-        badgeText = 'AGOTADO';
-        break;
-      case RiskLevel.alto:
-        badgeColor = const Color(0xFFE65100);
-        badgeText = (item.stockActual <= item.stockMinimo)
-            ? 'Stock: ${item.stockActual.toStringAsFixed(item.stockActual % 1 != 0 ? 1 : 0)} / Mín: ${item.stockMinimo.toStringAsFixed(0)}'
-            : '${item.diasRestantes.toStringAsFixed(1)} DÍAS';
-        break;
-      case RiskLevel.moderado:
-      default:
-        badgeColor = const Color(0xFFF57C00);
-        badgeText = '${item.diasRestantes.toStringAsFixed(1)} DÍAS';
-        break;
+    if (isAgotado) {
+      badgeColor = const Color(0xFFD32F2F);
+      badgeText = '¡AGOTADO!';
+    } else if (isBajoMinimo) {
+      badgeColor = const Color(0xFFE65100);
+      badgeText = 'BAJO MÍNIMO';
+    } else {
+      badgeColor = const Color(0xFFF57C00);
+      badgeText = '${item.diasRestantes.toStringAsFixed(1)} DÍAS RESTANTES';
     }
 
     final bool isGranel = (item.stockActual % 1 != 0);
-    final String stockFormat = item.stockActual.toStringAsFixed(isGranel ? 3 : 0);
+    final String stockFmt = item.stockActual.toStringAsFixed(isGranel ? 2 : 0);
+    final String minFmt = item.stockMinimo.toStringAsFixed(0);
+    final String v30dFmt = item.ventasUltimos30Dias.toStringAsFixed(isGranel ? 1 : 0);
+    final String totFmt = item.totalUnidadesVendidas.toStringAsFixed(isGranel ? 1 : 0);
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundColor: badgeColor.withValues(alpha: 0.12),
-        child: Icon(
-          item.nivelRiesgo == RiskLevel.critico ? Icons.error_outline : Icons.warning_amber_rounded,
-          color: badgeColor,
-        ),
-      ),
-      title: Text(
-        item.descripcion,
-        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-      ),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 4.0),
-        child: Text(
-          'Stock actual: $stockFormat | Salida diaria: ${item.velocidadDiaria.toStringAsFixed(2)} unid/día',
-          style: const TextStyle(fontSize: 12, color: Colors.black87),
-        ),
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-            decoration: BoxDecoration(
-              color: badgeColor,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(
-              badgeText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-              ),
-            ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isAgotado ? const Color(0xFFFFEBEE) : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isAgotado ? Colors.red.shade300 : Colors.grey.shade300,
+            width: isAgotado ? 1.5 : 1.0,
           ),
-          const SizedBox(height: 4),
-          Text(
-            '30d: ${item.ventasUltimos30Dias.toStringAsFixed(isGranel ? 1 : 0)} vend.',
-            style: const TextStyle(fontSize: 11, color: Colors.grey),
-          ),
-        ],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    item.descripcion,
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF263238)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: badgeColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    badgeText,
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3E0),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: Colors.orange.shade300),
+                  ),
+                  child: Text(
+                    '🔥 Vendidos (30d): $v30dFmt pzs',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Histórico: $totFmt pzs',
+                  style: const TextStyle(fontSize: 11, color: Colors.black54, fontWeight: FontWeight.w600),
+                ),
+                if (item.velocidadDiaria > 0) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    '(${item.velocidadDiaria.toStringAsFixed(1)} pzs/día)',
+                    style: const TextStyle(fontSize: 10, color: Colors.grey),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(fontSize: 12, color: Colors.black87),
+                    children: [
+                      const TextSpan(text: 'Stock Actual: '),
+                      TextSpan(
+                        text: isAgotado ? '¡AGOTADO! ($stockFmt pzs)' : '$stockFmt pzs',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: isAgotado ? Colors.red.shade800 : (isBajoMinimo ? Colors.orange.shade900 : Colors.green.shade800),
+                        ),
+                      ),
+                      TextSpan(text: '  vs  Mínimo: $minFmt pzs', style: const TextStyle(color: Colors.black54)),
+                    ],
+                  ),
+                ),
+                const Spacer(),
+                if (item.ubicacion != null && item.ubicacion!.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFEBE9),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.brown.shade300),
+                    ),
+                    child: Text(
+                      '📍 ${item.ubicacion}',
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.brown.shade800),
+                    ),
+                  ),
+                ],
+                if (item.codigoEquivalencia != null && item.codigoEquivalencia!.isNotEmpty) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE3F2FD),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.blue.shade300),
+                    ),
+                    child: Text(
+                      '🔗 ${item.codigoEquivalencia}',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF0D47A1)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

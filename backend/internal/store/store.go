@@ -220,6 +220,36 @@ func (s *Store) UpsertProduct(p Product) error {
 	return s.save()
 }
 
+// UpsertProductsBatch inserta o actualiza una lista de productos guardando a disco una sola vez
+func (s *Store) UpsertProductsBatch(prods []Product) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := time.Now().UTC()
+	for _, p := range prods {
+		existing, ok := s.data.Products[p.ID]
+		if ok {
+			if p.TotalUnidadesVendidas == 0 {
+				p.TotalUnidadesVendidas = existing.TotalUnidadesVendidas
+			}
+			if p.VentasUltimos30Dias == 0 {
+				p.VentasUltimos30Dias = existing.VentasUltimos30Dias
+			}
+			if p.UltimaVentaAt == nil {
+				p.UltimaVentaAt = existing.UltimaVentaAt
+			}
+			if p.CreatedAt.IsZero() {
+				p.CreatedAt = existing.CreatedAt
+			}
+		} else if p.CreatedAt.IsZero() {
+			p.CreatedAt = now
+		}
+		p.UpdatedAt = now
+		s.data.Products[p.ID] = p
+	}
+	return s.save()
+}
+
 // DeleteProduct elimina un producto del catálogo local
 func (s *Store) DeleteProduct(id string) error {
 	s.mu.Lock()
@@ -256,6 +286,20 @@ func (s *Store) RecordSale(sale SaleRecord, items []map[string]any) error {
 			p.UltimaVentaAt = &now
 			p.UpdatedAt = now
 			s.data.Products[prodID] = p
+
+			// Descontar insumo vinculado si es un servicio
+			if p.EsServicio == 1 && p.InsumoVinculadoID != nil && *p.InsumoVinculadoID != "" {
+				insumoID := *p.InsumoVinculadoID
+				if insumo, okInsumo := s.data.Products[insumoID]; okInsumo {
+					cantInsumo := p.CantidadInsumo
+					if cantInsumo <= 0 {
+						cantInsumo = 1.0
+					}
+					insumo.StockActual -= (qty * cantInsumo)
+					insumo.UpdatedAt = now
+					s.data.Products[insumoID] = insumo
+				}
+			}
 		}
 	}
 
@@ -351,21 +395,34 @@ func (s *Store) UpsertClient(clienteID string, payload map[string]any) error {
 
 // StockAlertDTO mapea la respuesta esperada por /api/v1/inventory/alerts
 type StockAlertDTO struct {
-	ID                  string     `json:"id"`
-	TiendaID            string     `json:"tienda_id"`
-	CodigoBarras        *string    `json:"codigo_barras"`
-	SKU                 *string    `json:"sku"`
-	Descripcion         string     `json:"descripcion"`
-	StockActual         float64    `json:"stock_actual"`
-	StockMinimo         float64    `json:"stock_minimo"`
-	VentasUltimos30Dias float64    `json:"ventas_ultimos_30dias"`
-	VelocidadDiaria     float64    `json:"velocidad_diaria"`
-	DiasRestantes       float64    `json:"dias_restantes"`
-	NivelRiesgo         string     `json:"nivel_riesgo"`
-	UltimaVentaAt       *time.Time `json:"ultima_venta_at"`
+	ID                    string     `json:"id"`
+	TiendaID              string     `json:"tienda_id"`
+	CodigoBarras          *string    `json:"codigo_barras"`
+	SKU                   *string    `json:"sku"`
+	Descripcion           string     `json:"descripcion"`
+	StockActual           float64    `json:"stock_actual"`
+	StockMinimo           float64    `json:"stock_minimo"`
+	VentasUltimos30Dias   float64    `json:"ventas_ultimos_30dias"`
+	TotalUnidadesVendidas float64    `json:"total_unidades_vendidas"`
+	VelocidadDiaria       float64    `json:"velocidad_diaria"`
+	DiasRestantes         float64    `json:"dias_restantes"`
+	NivelRiesgo           string     `json:"nivel_riesgo"`
+	UltimaVentaAt         *time.Time `json:"ultima_venta_at"`
+	Ubicacion             *string    `json:"ubicacion,omitempty"`
+	CodigoEquivalencia    *string    `json:"codigo_equivalencia,omitempty"`
 }
 
 // GetAlerts genera el listado de alertas predictivas de escasez
+func (s *Store) GetAllProducts() []Product {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make([]Product, 0, len(s.data.Products))
+	for _, p := range s.data.Products {
+		res = append(res, p)
+	}
+	return res
+}
+
 func (s *Store) GetAlerts(runwayDays float64) []StockAlertDTO {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -396,30 +453,50 @@ func (s *Store) GetAlerts(runwayDays float64) []StockAlertDTO {
 			riesgo = "MODERADO"
 		}
 
-		// Filtrar solo productos en riesgo
-		if p.StockActual <= stockMin || (p.VentasUltimos30Dias > 0 && diasRestantes <= runwayDays) {
+		// Filtrar productos en riesgo o agotados
+		if p.StockActual <= 0 || p.StockActual <= stockMin || (p.VentasUltimos30Dias > 0 && diasRestantes <= runwayDays) {
 			desc := p.Descripcion
 			if desc == "" {
 				desc = p.Nombre
 			}
 			alerts = append(alerts, StockAlertDTO{
-				ID:                  p.ID,
-				TiendaID:            "tienda-001",
-				CodigoBarras:        p.CodigoBarras,
-				SKU:                 p.SKU,
-				Descripcion:         desc,
-				StockActual:         p.StockActual,
-				StockMinimo:         stockMin,
-				VentasUltimos30Dias: p.VentasUltimos30Dias,
-				VelocidadDiaria:     velDiaria,
-				DiasRestantes:       diasRestantes,
-				NivelRiesgo:         riesgo,
-				UltimaVentaAt:       p.UltimaVentaAt,
+				ID:                    p.ID,
+				TiendaID:              "tienda-001",
+				CodigoBarras:          p.CodigoBarras,
+				SKU:                   p.SKU,
+				Descripcion:           desc,
+				StockActual:           p.StockActual,
+				StockMinimo:           stockMin,
+				VentasUltimos30Dias:   p.VentasUltimos30Dias,
+				TotalUnidadesVendidas: p.TotalUnidadesVendidas,
+				VelocidadDiaria:       velDiaria,
+				DiasRestantes:         diasRestantes,
+				NivelRiesgo:           riesgo,
+				UltimaVentaAt:         p.UltimaVentaAt,
+				Ubicacion:             p.Ubicacion,
+				CodigoEquivalencia:    p.CodigoEquivalencia,
 			})
 		}
 	}
 
 	sort.Slice(alerts, func(i, j int) bool {
+		if alerts[i].VentasUltimos30Dias != alerts[j].VentasUltimos30Dias {
+			return alerts[i].VentasUltimos30Dias > alerts[j].VentasUltimos30Dias
+		}
+		if alerts[i].TotalUnidadesVendidas != alerts[j].TotalUnidadesVendidas {
+			return alerts[i].TotalUnidadesVendidas > alerts[j].TotalUnidadesVendidas
+		}
+		aAgotado := 1
+		if alerts[i].StockActual <= 0 {
+			aAgotado = 0
+		}
+		bAgotado := 1
+		if alerts[j].StockActual <= 0 {
+			bAgotado = 0
+		}
+		if aAgotado != bAgotado {
+			return aAgotado < bAgotado
+		}
 		return alerts[i].StockActual < alerts[j].StockActual
 	})
 

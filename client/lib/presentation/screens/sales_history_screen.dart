@@ -78,11 +78,19 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
       cambio: 0.0,
     );
 
-    await widget.printerService!.printSaleTicketAsync(ticketData, openCashDrawer: false);
-    if (mounted) {
+    final res = await widget.printerService!.printSaleTicketAsync(ticketData, openCashDrawer: false);
+    if (!mounted) return;
+    if (res.success) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Comprobante enviado a impresora térmica.'), backgroundColor: Color(0xFF2E7D32)),
+        SnackBar(content: Text(res.message), backgroundColor: const Color(0xFF2E7D32)),
       );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(res.message), backgroundColor: Colors.orange.shade800),
+      );
+      if (res.plainTextTicket != null) {
+        PrinterService.showThermalPreviewDialog(context, res.plainTextTicket!);
+      }
     }
   }
 

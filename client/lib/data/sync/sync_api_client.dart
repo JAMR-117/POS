@@ -68,6 +68,39 @@ class SyncApiClient {
     }
   }
 
+  /// Verifica la disponibilidad del backend mediante el endpoint de salud
+  Future<bool> checkHealth() async {
+    try {
+      final endpoint = Uri.parse('$baseUrl/health');
+      final response = await _client.get(endpoint).timeout(const Duration(seconds: 3));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Descarga el catálogo consolidado de productos y clientes desde PostgreSQL (/api/v1/sync/pull)
+  Future<Map<String, dynamic>> pullUpdates({String? tiendaId}) async {
+    final uri = Uri.parse('$baseUrl/api/v1/sync/pull').replace(
+      queryParameters: tiendaId != null ? {'tienda_id': tiendaId} : null,
+    );
+    try {
+      final response = await _client.get(
+        uri,
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body) as Map<String, dynamic>;
+      } else {
+        throw SyncApiException('Error en pull updates: ${response.body}', statusCode: response.statusCode);
+      }
+    } catch (e) {
+      if (e is SyncApiException) rethrow;
+      throw SyncApiException('Fallo al descargar actualizaciones (Pull): $e');
+    }
+  }
+
   void dispose() {
     _client.close();
   }

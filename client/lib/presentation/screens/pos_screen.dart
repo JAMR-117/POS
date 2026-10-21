@@ -33,6 +33,7 @@ import '../widgets/quick_product_form_dialog.dart';
 import '../widgets/client_selection_dialog.dart';
 import '../widgets/advanced_product_search_dialog.dart';
 import '../widgets/cash_movement_dialog.dart';
+import '../widgets/insufficient_stock_dialog.dart';
 
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
@@ -115,6 +116,105 @@ class _PosScreenState extends State<PosScreen> {
     });
   }
 
+  Future<void> _tryAddProduct(Product product, {double quantity = 1.0}) async {
+    final existingIndex = widget.cartController.items.indexWhere((i) => i.productoId == product.id);
+    final double currentInCart = existingIndex != -1 ? widget.cartController.items[existingIndex].cantidad : 0.0;
+    final double targetTotal = currentInCart + quantity;
+
+    final effectiveStock = await widget.cartController.getEffectiveStockForProduct(product);
+
+    if (effectiveStock != double.infinity && targetTotal > effectiveStock) {
+      if (!mounted) return;
+      final decision = await InsufficientStockDialog.show(
+        context: context,
+        productName: product.nombre,
+        currentStock: effectiveStock,
+        requestedQuantity: targetTotal,
+        location: product.ubicacion,
+      );
+
+      if (decision == InsufficientStockDecision.allowNegative) {
+        widget.cartController.addProduct(product, quantity: quantity);
+      } else if (decision == InsufficientStockDecision.adjustToLimit) {
+        if (effectiveStock <= 0) {
+          if (existingIndex != -1) {
+            widget.cartController.removeItem(widget.cartController.items[existingIndex].id);
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Operación cancelada: No se agregó "${product.nombre}" por falta de existencias.'),
+                backgroundColor: Colors.orange.shade800,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          if (existingIndex != -1) {
+            widget.cartController.updateQuantity(widget.cartController.items[existingIndex].id, effectiveStock);
+          } else {
+            widget.cartController.addProduct(product, quantity: effectiveStock);
+          }
+        }
+      }
+    } else {
+      widget.cartController.addProduct(product, quantity: quantity);
+    }
+    _refocusSearch();
+  }
+
+  Future<void> _tryUpdateQuantity(SaleDetailItem item, double newQuantity) async {
+    if (newQuantity <= 0) {
+      widget.cartController.removeItem(item.id);
+      _refocusSearch();
+      return;
+    }
+
+    Product? prod = widget.cartController.getProductFromCache(item.productoId);
+    if (prod == null) {
+      prod = await widget.cartController.salesRepository.findProductById(item.productoId);
+      if (prod != null) widget.cartController.cacheProduct(prod);
+    }
+
+    final double effectiveStock = prod != null
+        ? await widget.cartController.getEffectiveStockForProduct(prod)
+        : item.stockDisponible;
+
+    if (effectiveStock != double.infinity && newQuantity > effectiveStock) {
+      if (!mounted) return;
+      final decision = await InsufficientStockDialog.show(
+        context: context,
+        productName: item.nombre,
+        currentStock: effectiveStock,
+        requestedQuantity: newQuantity,
+        location: item.ubicacion,
+      );
+
+      if (decision == InsufficientStockDecision.allowNegative) {
+        widget.cartController.updateQuantity(item.id, newQuantity);
+      } else if (decision == InsufficientStockDecision.adjustToLimit) {
+        if (effectiveStock <= 0) {
+          widget.cartController.removeItem(item.id);
+        } else {
+          widget.cartController.updateQuantity(item.id, effectiveStock);
+        }
+      }
+    } else {
+      widget.cartController.updateQuantity(item.id, newQuantity);
+    }
+    _refocusSearch();
+  }
+
+  Future<void> _tryIncrementQuantity(SaleDetailItem item) async {
+    await _tryUpdateQuantity(item, item.cantidad + 1.0);
+  }
+
+  Future<void> _tryIncrementLastItem() async {
+    if (widget.cartController.items.isNotEmpty) {
+      await _tryIncrementQuantity(widget.cartController.items.last);
+    }
+  }
+
   Future<void> _handleBarcodeScan(String input) async {
     final text = input.trim();
     if (text.isEmpty) return;
@@ -126,6 +226,8 @@ class _PosScreenState extends State<PosScreen> {
 
     if (results.length > 1 && mounted) {
       _showIncrementalSearchResults(results);
+    } else if (results.length == 1 && mounted) {
+      await _tryAddProduct(results.first);
     } else if (results.isEmpty && mounted) {
       final wantsToAdd = await showDialog<bool>(
         context: context,
@@ -148,10 +250,12 @@ class _PosScreenState extends State<PosScreen> {
         final newProduct = await QuickProductFormDialog.show(context, text, productRepo);
         
         if (newProduct != null && mounted) {
-          widget.cartController.addProduct(newProduct);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
-          );
+          await _tryAddProduct(newProduct);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
+            );
+          }
         }
       }
     }
@@ -290,10 +394,9 @@ class _PosScreenState extends State<PosScreen> {
                       ),
                   ],
                 ),
-                onTap: () {
-                  widget.cartController.addProduct(prod);
+                onTap: () async {
                   Navigator.of(ctx).pop();
-                  _refocusSearch();
+                  await _tryAddProduct(prod);
                 },
               );
             },
@@ -394,8 +497,8 @@ class _PosScreenState extends State<PosScreen> {
       ),
     );
 
-    if (newQty != null && newQty > 0) {
-      widget.cartController.updateQuantity(item.id, newQty);
+    if (newQty != null) {
+      await _tryUpdateQuantity(item, newQty);
     }
     _refocusSearch();
   }
@@ -451,12 +554,37 @@ class _PosScreenState extends State<PosScreen> {
           cambio: cambio,
         );
 
-        unawaited(
-          widget.printerService.printSaleTicketAsync(
-            ticketData,
-            openCashDrawer: true, 
-          ),
-        );
+        widget.printerService.printSaleTicketAsync(
+          ticketData,
+          openCashDrawer: true,
+        ).then((res) {
+          if (!mounted) return;
+          if (res.success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(res.message), backgroundColor: const Color(0xFF2E7D32)),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(res.message),
+                backgroundColor: Colors.orange.shade800,
+                action: res.plainTextTicket != null
+                    ? SnackBarAction(
+                        label: 'Ver Ticket',
+                        textColor: Colors.white,
+                        onPressed: () {
+                          PrinterService.showThermalPreviewDialog(context, res.plainTextTicket!);
+                        },
+                      )
+                    : null,
+              ),
+            );
+          }
+        });
+
+        // Disparar sincronización inmediata de la venta y actualizar alertas
+        widget.syncWorker.triggerSyncNow();
+        widget.alertsController.loadAlerts(silent: true);
       }
       _refocusSearch();
     });
@@ -610,7 +738,7 @@ class _PosScreenState extends State<PosScreen> {
       initialQuery: initialQuery,
     );
     if (selectedProduct != null && mounted) {
-      widget.cartController.addProduct(selectedProduct);
+      await _tryAddProduct(selectedProduct);
     }
     _refocusSearch();
   }
@@ -653,7 +781,7 @@ class _PosScreenState extends State<PosScreen> {
   Future<void> _openSettingsScreen() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => const SettingsScreen(),
+        builder: (_) => SettingsScreen(printerService: widget.printerService),
       ),
     );
     _refocusSearch();
@@ -827,7 +955,7 @@ class _PosScreenState extends State<PosScreen> {
             if (event is KeyDownEvent) {
               if (event.logicalKey == LogicalKeyboardKey.numpadAdd ||
                   (event.character == '+' && _searchController.text.isEmpty)) {
-                widget.cartController.incrementLastItem();
+                _tryIncrementLastItem();
                 return KeyEventResult.handled;
               }
               if (event.logicalKey == LogicalKeyboardKey.numpadSubtract ||
@@ -1034,13 +1162,88 @@ class _PosScreenState extends State<PosScreen> {
               Container(
                 color: const Color(0xFF1F4E79),
                 padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                child: const Row(
+                child: Row(
                   children: [
-                    SizedBox(width: 130, child: Text('CANT.', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    Expanded(child: Text('PRODUCTO / SERVICIO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    SizedBox(width: 110, child: Text('P. UNIT', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    SizedBox(width: 100, child: Text('TOTAL', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    SizedBox(width: 40),
+                    const SizedBox(width: 130, child: Text('CANT.', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    const Expanded(child: Text('PRODUCTO / SERVICIO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    SizedBox(
+                      width: 130,
+                      child: Align(
+                        alignment: Alignment.centerRight,
+                        child: PopupMenuButton<String>(
+                          tooltip: 'Cambiar nivel de precio a todo el ticket',
+                          padding: EdgeInsets.zero,
+                          onSelected: (tier) {
+                            widget.cartController.applyGlobalPriceTier(tier);
+                          },
+                          itemBuilder: (ctx) => [
+                            const PopupMenuItem(
+                              value: 'Público',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.people, size: 16, color: Color(0xFF2E7D32)),
+                                  SizedBox(width: 8),
+                                  Text('Público (Normal)'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'Cerrajero',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.vpn_key, size: 16, color: Color(0xFF0D47A1)),
+                                  SizedBox(width: 8),
+                                  Text('Colega Cerrajero'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'Taller',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.build, size: 16, color: Color(0xFF4A148C)),
+                                  SizedBox(width: 8),
+                                  Text('Taller Automotriz'),
+                                ],
+                              ),
+                            ),
+                            const PopupMenuItem(
+                              value: 'Mayoreo',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.layers, size: 16, color: Color(0xFFE65100)),
+                                  SizedBox(width: 8),
+                                  Text('Precio Mayoreo'),
+                                ],
+                              ),
+                            ),
+                          ],
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Text(
+                                  'P. UNIT ',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                                ),
+                                Text(
+                                  '[${widget.cartController.currentGlobalTier} ▾]',
+                                  style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, fontSize: 10),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 100, child: Text('TOTAL', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+                    const SizedBox(width: 40),
                   ],
                 ),
               ),
@@ -1100,7 +1303,7 @@ class _PosScreenState extends State<PosScreen> {
                                 const SizedBox(width: 4),
                                 InkWell(
                                   borderRadius: BorderRadius.circular(4),
-                                  onTap: () => widget.cartController.incrementQuantity(item.id),
+                                  onTap: () => _tryIncrementQuantity(item),
                                   child: Container(
                                     padding: const EdgeInsets.all(4),
                                     decoration: BoxDecoration(
@@ -1219,7 +1422,7 @@ class _PosScreenState extends State<PosScreen> {
 
                           // Precio Unitario Interactivo con Selector de Nivel
                           SizedBox(
-                            width: 110,
+                            width: 130,
                             child: InkWell(
                               borderRadius: BorderRadius.circular(4),
                               onTap: () => _showPriceTierMenu(item),
