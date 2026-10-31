@@ -59,10 +59,15 @@ class _OpenShiftDialogState extends State<OpenShiftDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Text('Apertura de Caja Requerida', style: TextStyle(fontWeight: FontWeight.bold)),
-      content: SizedBox(
-        width: 380,
-        child: Column(
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 400,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -86,6 +91,7 @@ class _OpenShiftDialogState extends State<OpenShiftDialog> {
               onSubmitted: (_) => _handleOpen(),
             ),
           ],
+        ),
         ),
       ),
       actions: [

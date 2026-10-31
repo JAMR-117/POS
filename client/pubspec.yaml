@@ -29,3 +29,5 @@ flutter:
       - lib/data/local/schema.sql
       - assets/catalogo_migrado_pos.csv
       - assets/clientes_migrados_pos.csv
+      - assets/ventas_historicas_clientes.json
+      - assets/abonos_historicos_clientes.json

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import '../../core/string_utils.dart';
 import '../../data/local/models.dart';
 
 class QuoteDialog extends StatelessWidget {
@@ -94,15 +95,18 @@ class QuoteDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final fechaStr = DateFormat('dd/MM/yyyy HH:mm').format(now);
-    final folio = 'COT-${now.millisecondsSinceEpoch.toString().substring(7)}';
+    final folio = 'COT-${now.millisecondsSinceEpoch.toString().safeSub(7)}';
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       child: Container(
         width: 480,
-        constraints: const BoxConstraints(maxHeight: 650),
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(8),
@@ -203,7 +207,8 @@ class QuoteDialog extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('Folio: $folio', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                          Flexible(child: Text('Folio: $folio', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13), overflow: TextOverflow.ellipsis)),
+                          const SizedBox(width: 8),
                           Text(fechaStr, style: const TextStyle(color: Colors.black54, fontSize: 13)),
                         ],
                       ),
@@ -327,7 +332,11 @@ class QuoteDialog extends StatelessWidget {
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: Color(0xFFEEEEEE))),
               ),
-              child: Row(
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
@@ -335,7 +344,7 @@ class QuoteDialog extends StatelessWidget {
                       side: const BorderSide(color: Color(0xFF2E7D32)),
                     ),
                     icon: const Icon(Icons.copy, size: 18),
-                    label: const Text('Copiar Texto (WhatsApp / Mail)'),
+                    label: const Text('Copiar Texto'),
                     onPressed: () {
                       final plainText = _generatePlainTextTicket(folio, fechaStr);
                       Clipboard.setData(ClipboardData(text: plainText));
@@ -348,7 +357,6 @@ class QuoteDialog extends StatelessWidget {
                       );
                     },
                   ),
-                  const Spacer(),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1F4E79),

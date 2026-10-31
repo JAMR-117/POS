@@ -97,6 +97,7 @@ class _CashMovementDialogState extends State<CashMovementDialog> {
         },
       },
       child: AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         titlePadding: EdgeInsets.zero,
         contentPadding: const EdgeInsets.all(20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -120,12 +121,16 @@ class _CashMovementDialogState extends State<CashMovementDialog> {
             ],
           ),
         ),
-        content: SizedBox(
-          width: 420,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 440,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               const Text(
                 'Registre entradas o retiros manuales. Esta operación ajustará inmediatamente el efectivo teórico esperado en su Corte X/Z.',
                 style: TextStyle(fontSize: 13, color: Colors.black87),
@@ -179,7 +184,8 @@ class _CashMovementDialogState extends State<CashMovementDialog> {
             ],
           ),
         ),
-        actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+      actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         actions: [
           OutlinedButton(
             style: OutlinedButton.styleFrom(

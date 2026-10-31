@@ -116,6 +116,7 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
     }
 
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.balance, color: Color(0xFF1F4E79)),
@@ -123,9 +124,13 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
           Text('Ajuste y Merma Físico', style: TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
-      content: SizedBox(
-        width: 400,
-        child: Form(
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Form(
           key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -181,6 +186,7 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
           ),
         ),
       ),
+    ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
         ElevatedButton(

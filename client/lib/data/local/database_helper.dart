@@ -1,15 +1,18 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:csv/csv.dart';
+import '../../core/department_theme.dart';
 import 'database_seeder.dart';
 import 'models.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
+  static int _movSeq = 0;
 
   DatabaseHelper._init();
 
@@ -25,7 +28,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: _onConfigure,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
@@ -86,7 +89,8 @@ class DatabaseHelper {
           precio_cerrajero REAL,
           precio_taller REAL,
           porcentaje_impuesto REAL NOT NULL DEFAULT 0.0,
-          departamento TEXT DEFAULT 'General',
+          departamento TEXT DEFAULT 'Residencial',
+          departamentos_aplicables TEXT DEFAULT 'Todos',
           stock_actual REAL NOT NULL DEFAULT 0.0,
           stock_minimo REAL NOT NULL DEFAULT 5.0,
           es_a_granel INTEGER NOT NULL DEFAULT 0 CHECK (es_a_granel IN (0, 1)),
@@ -102,6 +106,8 @@ class DatabaseHelper {
       '''CREATE TABLE IF NOT EXISTS ventas (
           id TEXT PRIMARY KEY NOT NULL,
           corte_caja_id TEXT NOT NULL,
+          cliente_id TEXT DEFAULT 'PUBLICO-GRAL',
+          cliente_nombre TEXT DEFAULT 'Público en General',
           folio_ticket TEXT,
           subtotal REAL NOT NULL,
           descuento_total REAL NOT NULL DEFAULT 0.0,
@@ -121,6 +127,8 @@ class DatabaseHelper {
           costo_historico REAL NOT NULL DEFAULT 0.0,
           descuento_linea REAL NOT NULL DEFAULT 0.0,
           total_linea REAL NOT NULL,
+          insumo_utilizado_id TEXT,
+          cantidad_insumo_consumida REAL NOT NULL DEFAULT 0.0,
           FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
           FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
       );''',
@@ -216,6 +224,7 @@ class DatabaseHelper {
       'CREATE INDEX IF NOT EXISTS idx_mov_inv_fecha ON movimientos_inventario(fecha);',
       'CREATE INDEX IF NOT EXISTS idx_sync_queue_status_created ON sync_queue(sync_status, created_at);',
       'CREATE INDEX IF NOT EXISTS idx_ventas_corte_id ON ventas(corte_caja_id);',
+      'CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id);',
       'CREATE INDEX IF NOT EXISTS idx_detalles_venta_venta_id ON detalles_venta(venta_id);',
       'CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);',
       'CREATE INDEX IF NOT EXISTS idx_movimientos_corte_id ON movimientos_caja(corte_caja_id);'
@@ -246,10 +255,23 @@ class DatabaseHelper {
     if (!prodCols.contains('cantidad_mayoreo')) await db.execute("ALTER TABLE productos ADD COLUMN cantidad_mayoreo REAL;");
     if (!prodCols.contains('precio_mayoreo')) await db.execute("ALTER TABLE productos ADD COLUMN precio_mayoreo REAL;");
     
-    // Nivel 2 y 3 de precios y stock mínimo (v3)
+    // Nivel 2 y 3 de precios y stock mínimo (v3) + Dynamic Runtime BOM (v4)
     if (!prodCols.contains('precio_cerrajero')) await db.execute("ALTER TABLE productos ADD COLUMN precio_cerrajero REAL;");
     if (!prodCols.contains('precio_taller')) await db.execute("ALTER TABLE productos ADD COLUMN precio_taller REAL;");
     if (!prodCols.contains('stock_minimo')) await db.execute("ALTER TABLE productos ADD COLUMN stock_minimo REAL NOT NULL DEFAULT 5.0;");
+    if (!prodCols.contains('departamentos_aplicables')) {
+      await db.execute("ALTER TABLE productos ADD COLUMN departamentos_aplicables TEXT DEFAULT 'Todos';");
+    }
+
+    // Detalles de venta: vínculo dinámico de insumo en caja (v4)
+    final tableInfoDet = await db.rawQuery('PRAGMA table_info(detalles_venta);');
+    final detCols = tableInfoDet.map((col) => col['name'] as String).toSet();
+    if (!detCols.contains('insumo_utilizado_id')) {
+      await db.execute("ALTER TABLE detalles_venta ADD COLUMN insumo_utilizado_id TEXT;");
+    }
+    if (!detCols.contains('cantidad_insumo_consumida')) {
+      await db.execute("ALTER TABLE detalles_venta ADD COLUMN cantidad_insumo_consumida REAL NOT NULL DEFAULT 0.0;");
+    }
 
     // Clientes extendidos
     final tableInfoCli = await db.rawQuery('PRAGMA table_info(clientes);');
@@ -265,6 +287,17 @@ class DatabaseHelper {
     final tableInfoUsr = await db.rawQuery('PRAGMA table_info(usuarios);');
     final usrCols = tableInfoUsr.map((col) => col['name'] as String).toSet();
     if (!usrCols.contains('permisos')) await db.execute("ALTER TABLE usuarios ADD COLUMN permisos TEXT;");
+
+    // Ventas: cliente_id y cliente_nombre para trazabilidad de crédito y estado de cuenta (v5)
+    final tableInfoVentas = await db.rawQuery('PRAGMA table_info(ventas);');
+    final ventasCols = tableInfoVentas.map((col) => col['name'] as String).toSet();
+    if (!ventasCols.contains('cliente_id')) {
+      await db.execute("ALTER TABLE ventas ADD COLUMN cliente_id TEXT DEFAULT 'PUBLICO-GRAL';");
+    }
+    if (!ventasCols.contains('cliente_nombre')) {
+      await db.execute("ALTER TABLE ventas ADD COLUMN cliente_nombre TEXT DEFAULT 'Público en General';");
+    }
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id);');
 
     // Tablas nuevas
     await db.execute('''CREATE TABLE IF NOT EXISTS departamentos (
@@ -301,7 +334,7 @@ class DatabaseHelper {
   /// Auto-importación silenciosa en segundo plano si el catálogo o clientes están vacíos
   Future<void> _autoBootstrapData(Database db) async {
     try {
-      // 1. Columnas de analítica y métricas predictivas
+      // 1. Columnas de analítica, métricas predictivas y Dynamic Runtime BOM
       try {
         await db.execute('ALTER TABLE productos ADD COLUMN ventas_ultimos_30dias REAL DEFAULT 0.0;');
       } catch (_) {}
@@ -311,16 +344,35 @@ class DatabaseHelper {
       try {
         await db.execute('ALTER TABLE productos ADD COLUMN ultima_venta_at TEXT;');
       } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE productos ADD COLUMN departamentos_aplicables TEXT DEFAULT 'Todos';");
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE detalles_venta ADD COLUMN insumo_utilizado_id TEXT;');
+      } catch (_) {}
+      try {
+        await db.execute('ALTER TABLE detalles_venta ADD COLUMN cantidad_insumo_consumida REAL NOT NULL DEFAULT 0.0;');
+      } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE ventas ADD COLUMN cliente_id TEXT DEFAULT 'PUBLICO-GRAL';");
+      } catch (_) {}
+      try {
+        await db.execute("ALTER TABLE ventas ADD COLUMN cliente_nombre TEXT DEFAULT 'Público en General';");
+      } catch (_) {}
 
-      // 2. Auto-bootstrap de productos desde assets
+      // 2. Auto-bootstrap / consolidación limpia v5 desde assets/catalogo_migrado_pos.csv
       final pCount = Sqflite.firstIntValue(await db.rawQuery(
-        "SELECT COUNT(*) FROM productos WHERE id != 'ART-COMUN';",
+        "SELECT COUNT(*) FROM productos WHERE es_servicio = 0 AND id != 'ART-COMUN';",
       )) ?? 0;
 
-      if (pCount == 0) {
+      final v5MetaRows = await db.query('app_metadata', where: 'key = ?', whereArgs: ['catalog_v5_cleaned'], limit: 1);
+      final bool alreadyCleanedV5 = v5MetaRows.isNotEmpty && v5MetaRows.first['value'] == 'true';
+
+      if (pCount == 0 || !alreadyCleanedV5) {
         final csvString = await rootBundle.loadString('assets/catalogo_migrado_pos.csv');
         if (csvString.isNotEmpty) {
-          final rows = const CsvToListConverter(eol: '\n', fieldDelimiter: ',', shouldParseNumbers: false).convert(csvString);
+          final normalizedCsv = csvString.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+          final rows = const CsvToListConverter(eol: '\n', fieldDelimiter: ',', shouldParseNumbers: false).convert(normalizedCsv);
           if (rows.length > 1) {
             final header = rows.first.map((e) => e.toString().toLowerCase().trim()).toList();
             final colCodigo = header.indexOf('codigo');
@@ -331,6 +383,7 @@ class DatabaseHelper {
             final colMolde = header.indexOf('codigo_equivalencia');
             final colUbi = header.indexOf('ubicacion');
             final colDepto = header.indexOf('departamento');
+            final colDeptosApl = header.indexOf('departamentos_aplicables');
             final colPC = header.indexOf('precio_compra');
             final colPV = header.indexOf('precio_venta');
             final colPCerrajero = header.indexOf('precio_cerrajero');
@@ -346,8 +399,20 @@ class DatabaseHelper {
             final colUltVenta = header.indexOf('ultima_venta_at');
 
             final isoNow = DateTime.now().toUtc().toIso8601String();
-            final batch = db.batch();
+            final Set<String> validCatalogIds = {'ART-COMUN'};
 
+            // Estandarizar tabla de departamentos a las 9 categorías limpias
+            await db.delete('departamentos');
+            for (final d in kAllStandardDepartments) {
+              final depId = 'dep-${d.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '-')}';
+              await db.insert(
+                'departamentos',
+                {'id': depId, 'nombre': d, 'created_at': isoNow},
+                conflictAlgorithm: ConflictAlgorithm.ignore,
+              );
+            }
+
+            final batch = db.batch();
             for (int i = 1; i < rows.length; i++) {
               final r = rows[i];
               if (r.isEmpty) continue;
@@ -356,8 +421,10 @@ class DatabaseHelper {
               if (cod == null || cod.isEmpty) continue;
 
               final id = cod;
+              validCatalogIds.add(id);
               final desc = colDesc != -1 && r.length > colDesc ? r[colDesc]?.toString().trim() : 'Producto';
               final nombre = colNombre != -1 && r.length > colNombre ? r[colNombre]?.toString().trim() : desc;
+              final rawDeptosApl = colDeptosApl != -1 && r.length > colDeptosApl ? r[colDeptosApl]?.toString().trim() : '';
 
               batch.insert(
                 'productos',
@@ -368,9 +435,10 @@ class DatabaseHelper {
                   'nombre': (nombre != null && nombre.isNotEmpty) ? nombre : desc,
                   'descripcion': (desc != null && desc.isNotEmpty) ? desc : nombre,
                   'marca': colMarca != -1 && r.length > colMarca ? r[colMarca]?.toString() : 'Genérica',
-                  'codigo_equivalencia': colMolde != -1 && r.length > colMolde ? r[colMolde]?.toString() : null,
-                  'ubicacion': colUbi != -1 && r.length > colUbi ? r[colUbi]?.toString() : null,
-                  'departamento': colDepto != -1 && r.length > colDepto ? r[colDepto]?.toString() : 'General',
+                  'codigo_equivalencia': colMolde != -1 && r.length > colMolde && r[colMolde].toString().trim().isNotEmpty ? r[colMolde].toString().trim() : null,
+                  'ubicacion': colUbi != -1 && r.length > colUbi && r[colUbi].toString().trim().isNotEmpty ? r[colUbi].toString().trim() : null,
+                  'departamento': colDepto != -1 && r.length > colDepto && r[colDepto].toString().trim().isNotEmpty ? r[colDepto].toString().trim() : 'Residencial',
+                  'departamentos_aplicables': (rawDeptosApl != null && rawDeptosApl.isNotEmpty) ? rawDeptosApl : 'Todos',
                   'precio_compra': colPC != -1 && r.length > colPC ? (num.tryParse(r[colPC].toString())?.toDouble() ?? 0.0) : 0.0,
                   'precio_venta': colPV != -1 && r.length > colPV ? (num.tryParse(r[colPV].toString())?.toDouble() ?? 0.0) : 0.0,
                   'precio_cerrajero': colPCerrajero != -1 && r.length > colPCerrajero ? num.tryParse(r[colPCerrajero].toString())?.toDouble() : null,
@@ -381,9 +449,11 @@ class DatabaseHelper {
                   'stock_minimo': colStockMin != -1 && r.length > colStockMin ? (num.tryParse(r[colStockMin].toString())?.toDouble() ?? 5.0) : 5.0,
                   'es_a_granel': colGranel != -1 && r.length > colGranel ? (int.tryParse(r[colGranel].toString()) ?? 0) : 0,
                   'es_servicio': colServicio != -1 && r.length > colServicio ? (int.tryParse(r[colServicio].toString()) ?? 0) : 0,
+                  'insumo_vinculado_id': null,
+                  'cantidad_insumo': 1.0,
                   'ventas_ultimos_30dias': colV30d != -1 && r.length > colV30d ? (num.tryParse(r[colV30d].toString())?.toDouble() ?? 0.0) : 0.0,
                   'total_unidades_vendidas': colTotVendidas != -1 && r.length > colTotVendidas ? (num.tryParse(r[colTotVendidas].toString())?.toDouble() ?? 0.0) : 0.0,
-                  'ultima_venta_at': colUltVenta != -1 && r.length > colUltVenta ? r[colUltVenta]?.toString() : null,
+                  'ultima_venta_at': colUltVenta != -1 && r.length > colUltVenta && r[colUltVenta].toString().trim().isNotEmpty ? r[colUltVenta].toString().trim() : null,
                   'created_at': isoNow,
                   'updated_at': isoNow,
                 },
@@ -391,6 +461,29 @@ class DatabaseHelper {
               );
             }
             await batch.commit(noResult: true);
+
+            // Limpiar servicios individuales obsoletos y duplicados viejos no referenciados en ventas históricas
+            final existingProds = await db.query('productos', columns: ['id']);
+            final usedRows = await db.rawQuery('SELECT DISTINCT producto_id FROM detalles_venta;');
+            final Set<String> usedIds = usedRows
+                .map((r) => r['producto_id']?.toString() ?? '')
+                .where((s) => s.isNotEmpty)
+                .toSet();
+
+            final cleanBatch = db.batch();
+            for (final ep in existingProds) {
+              final eid = ep['id'] as String;
+              if (!validCatalogIds.contains(eid) && !usedIds.contains(eid)) {
+                cleanBatch.delete('productos', where: 'id = ?', whereArgs: [eid]);
+              }
+            }
+            await cleanBatch.commit(noResult: true);
+
+            await db.insert(
+              'app_metadata',
+              {'key': 'catalog_v5_cleaned', 'value': 'true', 'updated_at': isoNow},
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
           }
         }
       }
@@ -445,6 +538,149 @@ class DatabaseHelper {
           }
         }
       }
+
+      // 4. Auto-bootstrap de Ventas y Tickets Históricos por Cliente (extraídos de Eleventa/Firebird)
+      try {
+        final clientVentasCount = Sqflite.firstIntValue(await db.rawQuery(
+          "SELECT COUNT(*) FROM ventas WHERE cliente_id IS NOT NULL AND cliente_id != 'PUBLICO-GRAL';",
+        )) ?? 0;
+
+        if (clientVentasCount == 0) {
+          final ventasJsonString = await rootBundle.loadString('assets/ventas_historicas_clientes.json');
+          if (ventasJsonString.isNotEmpty) {
+            final List<dynamic> ventasList = jsonDecode(ventasJsonString);
+            final batch = db.batch();
+            final isoNow = DateTime.now().toUtc().toIso8601String();
+
+            for (final v in ventasList) {
+              final ventaMap = v as Map<String, dynamic>;
+              final vId = ventaMap['id'] as String;
+              final cId = ventaMap['cliente_id']?.toString() ?? 'PUBLICO-GRAL';
+              final cNom = ventaMap['cliente_nombre']?.toString() ?? 'Público en General';
+
+              batch.insert(
+                'ventas',
+                {
+                  'id': vId,
+                  'corte_caja_id': ventaMap['corte_caja_id'] ?? 'CORTE-FDB-CAJA-1',
+                  'cliente_id': cId,
+                  'cliente_nombre': cNom,
+                  'folio_ticket': ventaMap['folio_ticket'],
+                  'subtotal': (ventaMap['subtotal'] as num?)?.toDouble() ?? 0.0,
+                  'descuento_total': (ventaMap['descuento_total'] as num?)?.toDouble() ?? 0.0,
+                  'impuestos_total': (ventaMap['impuestos_total'] as num?)?.toDouble() ?? 0.0,
+                  'total': (ventaMap['total'] as num?)?.toDouble() ?? 0.0,
+                  'pagos_desglose': ventaMap['pagos_desglose'] ?? '[]',
+                  'fecha_venta': ventaMap['fecha_venta'] ?? isoNow,
+                  'estatus': ventaMap['estatus'] ?? 'completado',
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+
+              final items = ventaMap['items'] as List<dynamic>? ?? [];
+              for (final it in items) {
+                final itemMap = it as Map<String, dynamic>;
+                final prodId = itemMap['producto_id']?.toString() ?? 'ART-COMUN';
+                final prodName = itemMap['nombre']?.toString() ?? prodId;
+
+                // Asegurar integridad referencial con productos
+                batch.insert(
+                  'productos',
+                  {
+                    'id': prodId,
+                    'codigo_barras': prodId,
+                    'sku': prodId,
+                    'nombre': prodName,
+                    'descripcion': prodName,
+                    'marca': 'Genérica',
+                    'departamento': 'Residencial',
+                    'departamentos_aplicables': 'Todos',
+                    'precio_compra': 0.0,
+                    'precio_venta': (itemMap['precio_historico'] as num?)?.toDouble() ?? 0.0,
+                    'stock_actual': 0.0,
+                    'stock_minimo': 0.0,
+                    'es_a_granel': 0,
+                    'es_servicio': 0,
+                    'insumo_vinculado_id': null,
+                    'cantidad_insumo': 1.0,
+                    'created_at': isoNow,
+                    'updated_at': isoNow,
+                  },
+                  conflictAlgorithm: ConflictAlgorithm.ignore,
+                );
+
+                batch.insert(
+                  'detalles_venta',
+                  {
+                    'id': itemMap['id'] ?? 'DET_${DateTime.now().microsecondsSinceEpoch}',
+                    'venta_id': vId,
+                    'producto_id': prodId,
+                    'cantidad': (itemMap['cantidad'] as num?)?.toDouble() ?? 1.0,
+                    'precio_historico': (itemMap['precio_historico'] as num?)?.toDouble() ?? 0.0,
+                    'costo_historico': (itemMap['costo_historico'] as num?)?.toDouble() ?? 0.0,
+                    'descuento_linea': (itemMap['descuento_linea'] as num?)?.toDouble() ?? 0.0,
+                    'total_linea': (itemMap['total_linea'] as num?)?.toDouble() ?? 0.0,
+                    'insumo_utilizado_id': null,
+                    'cantidad_insumo_consumida': 0.0,
+                  },
+                  conflictAlgorithm: ConflictAlgorithm.replace,
+                );
+              }
+            }
+            await batch.commit(noResult: true);
+          }
+        }
+      } catch (_) {}
+
+      // 5. Auto-bootstrap de Abonos a Crédito Históricos por Cliente (extraídos de Eleventa/Firebird)
+      try {
+        final abonosCount = Sqflite.firstIntValue(await db.rawQuery(
+          "SELECT COUNT(*) FROM abonos_credito;",
+        )) ?? 0;
+
+        if (abonosCount == 0) {
+          final abonosJsonString = await rootBundle.loadString('assets/abonos_historicos_clientes.json');
+          if (abonosJsonString.isNotEmpty) {
+            final List<dynamic> abonosList = jsonDecode(abonosJsonString);
+            final batch = db.batch();
+            final isoNow = DateTime.now().toUtc().toIso8601String();
+
+            for (final a in abonosList) {
+              final abonoMap = a as Map<String, dynamic>;
+              final cId = abonoMap['cliente_id']?.toString() ?? 'PUBLICO-GRAL';
+              final cNom = abonoMap['cliente_nombre']?.toString() ?? cId;
+
+              // Asegurar existencia del cliente para clave foránea
+              batch.insert(
+                'clientes',
+                {
+                  'id': cId,
+                  'nombre': cNom,
+                  'limite_credito': 0.0,
+                  'saldo_deudor': 0.0,
+                  'activo': 1,
+                  'tarifa_preferencial': 'Público',
+                  'created_at': isoNow,
+                },
+                conflictAlgorithm: ConflictAlgorithm.ignore,
+              );
+
+              batch.insert(
+                'abonos_credito',
+                {
+                  'id': abonoMap['id'],
+                  'cliente_id': cId,
+                  'corte_caja_id': abonoMap['corte_caja_id'] ?? 'CORTE-FDB-ABONO',
+                  'monto': (abonoMap['monto'] as num?)?.toDouble() ?? 0.0,
+                  'fecha': abonoMap['fecha'] ?? isoNow,
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+            }
+            await batch.commit(noResult: true);
+          }
+        }
+      } catch (_) {}
     } catch (_) {
       // Ignorar fallos de bootstrap si assets no están presentes en pruebas
     }
@@ -464,19 +700,37 @@ class DatabaseHelper {
     String? motivo,
   }) async {
     final nowIso = DateTime.now().toUtc().toIso8601String();
-    final id = 'MOV_${DateTime.now().microsecondsSinceEpoch}';
+    _movSeq = (_movSeq + 1) % 100000;
+    final id = 'MOV_${DateTime.now().microsecondsSinceEpoch}_$_movSeq';
+
+    // Normalizar tipo para compatibilidad estricta con CHECK constraint de SQLite ('VENTA', 'ENTRADA', 'AJUSTE', 'DEVOLUCION')
+    String safeTipo = tipo.toUpperCase();
+    String? safeMotivo = motivo;
+    if (safeTipo == 'VENTA_SERVICIO') {
+      safeTipo = 'VENTA';
+      if (safeMotivo == null || !safeMotivo.toLowerCase().contains('servicio')) {
+        safeMotivo = '[Servicio] ${safeMotivo ?? ""}'.trim();
+      }
+    } else if (safeTipo == 'CANCELACION') {
+      safeTipo = 'DEVOLUCION';
+      if (safeMotivo == null || !safeMotivo.toLowerCase().contains('cancel')) {
+        safeMotivo = '[Cancelación] ${safeMotivo ?? ""}'.trim();
+      }
+    } else if (!const {'VENTA', 'ENTRADA', 'AJUSTE', 'DEVOLUCION'}.contains(safeTipo)) {
+      safeTipo = 'AJUSTE';
+    }
 
     await db.insert('movimientos_inventario', {
       'id': id,
       'producto_id': productoId,
       'producto_desc': productoDesc,
-      'tipo': tipo,
+      'tipo': safeTipo,
       'cantidad': cantidad,
       'stock_anterior': stockAnterior,
       'stock_nuevo': stockNuevo,
       'usuario_id': usuarioId,
       'departamento': departamento,
-      'motivo': motivo,
+      'motivo': safeMotivo,
       'fecha': nowIso,
       'created_at': nowIso,
     });

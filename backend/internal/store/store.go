@@ -31,9 +31,10 @@ type Product struct {
 	EsAGranel             int        `json:"es_a_granel"`
 	CantidadMayoreo       *float64   `json:"cantidad_mayoreo,omitempty"`
 	PrecioMayoreo         *float64   `json:"precio_mayoreo,omitempty"`
-	EsServicio            int        `json:"es_servicio"`
-	InsumoVinculadoID     *string    `json:"insumo_vinculado_id,omitempty"`
-	CantidadInsumo        float64    `json:"cantidad_insumo"`
+	EsServicio              int        `json:"es_servicio"`
+	DepartamentosAplicables string     `json:"departamentos_aplicables,omitempty"`
+	InsumoVinculadoID       *string    `json:"insumo_vinculado_id,omitempty"`
+	CantidadInsumo          float64    `json:"cantidad_insumo"`
 	TotalUnidadesVendidas float64    `json:"total_unidades_vendidas"`
 	VentasUltimos30Dias   float64    `json:"ventas_ultimos_30dias"`
 	UltimaVentaAt         *time.Time `json:"ultima_venta_at,omitempty"`
@@ -258,7 +259,7 @@ func (s *Store) DeleteProduct(id string) error {
 	return s.save()
 }
 
-// RecordSale asimila una venta y descuenta stock atómicamente
+// RecordSale asimila una venta y descuenta stock atómicamente (con soporte de Dynamic Runtime BOM)
 func (s *Store) RecordSale(sale SaleRecord, items []map[string]any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,23 +280,49 @@ func (s *Store) RecordSale(sale SaleRecord, items []map[string]any) error {
 			qty = float64(v)
 		}
 
-		if p, ok := s.data.Products[prodID]; ok {
-			p.StockActual -= qty
-			p.TotalUnidadesVendidas += qty
-			p.VentasUltimos30Dias += qty
-			p.UltimaVentaAt = &now
-			p.UpdatedAt = now
-			s.data.Products[prodID] = p
+		insumoUtilizadoID, _ := it["insumo_utilizado_id"].(string)
+		var cantInsumoConsumida float64
+		switch v := it["cantidad_insumo_consumida"].(type) {
+		case float64:
+			cantInsumoConsumida = v
+		case int:
+			cantInsumoConsumida = float64(v)
+		}
 
-			// Descontar insumo vinculado si es un servicio
-			if p.EsServicio == 1 && p.InsumoVinculadoID != nil && *p.InsumoVinculadoID != "" {
+		// A. Servicio con Insumo Dinámico vinculado en caja
+		if insumoUtilizadoID != "" && cantInsumoConsumida > 0 {
+			if insumo, okInsumo := s.data.Products[insumoUtilizadoID]; okInsumo {
+				insumo.StockActual -= cantInsumoConsumida
+				insumo.TotalUnidadesVendidas += cantInsumoConsumida
+				insumo.VentasUltimos30Dias += cantInsumoConsumida
+				insumo.UltimaVentaAt = &now
+				insumo.UpdatedAt = now
+				s.data.Products[insumoUtilizadoID] = insumo
+			}
+			continue
+		}
+
+		// B. Producto físico normal o servicio legacy
+		if p, ok := s.data.Products[prodID]; ok {
+			if p.EsServicio == 0 {
+				p.StockActual -= qty
+				p.TotalUnidadesVendidas += qty
+				p.VentasUltimos30Dias += qty
+				p.UltimaVentaAt = &now
+				p.UpdatedAt = now
+				s.data.Products[prodID] = p
+			} else if p.InsumoVinculadoID != nil && *p.InsumoVinculadoID != "" {
 				insumoID := *p.InsumoVinculadoID
 				if insumo, okInsumo := s.data.Products[insumoID]; okInsumo {
 					cantInsumo := p.CantidadInsumo
 					if cantInsumo <= 0 {
 						cantInsumo = 1.0
 					}
-					insumo.StockActual -= (qty * cantInsumo)
+					descTotal := qty * cantInsumo
+					insumo.StockActual -= descTotal
+					insumo.TotalUnidadesVendidas += descTotal
+					insumo.VentasUltimos30Dias += descTotal
+					insumo.UltimaVentaAt = &now
 					insumo.UpdatedAt = now
 					s.data.Products[insumoID] = insumo
 				}
@@ -306,7 +333,7 @@ func (s *Store) RecordSale(sale SaleRecord, items []map[string]any) error {
 	return s.save()
 }
 
-// CancelSale anula una venta y reincorpora el stock
+// CancelSale anula una venta y reincorpora el stock del producto o insumo utilizado
 func (s *Store) CancelSale(ventaID, motivo string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -319,9 +346,9 @@ func (s *Store) CancelSale(ventaID, motivo string) error {
 	sale.Estatus = "cancelado"
 	s.data.Sales[ventaID] = sale
 
-	// Devolver stock si los items fueron registrados
 	var items []map[string]any
 	if err := json.Unmarshal(sale.Items, &items); err == nil {
+		now := time.Now().UTC()
 		for _, it := range items {
 			prodID, _ := it["producto_id"].(string)
 			if prodID == "" || prodID == "ART-COMUN" {
@@ -335,12 +362,48 @@ func (s *Store) CancelSale(ventaID, motivo string) error {
 				qty = float64(v)
 			}
 
+			insumoUtilizadoID, _ := it["insumo_utilizado_id"].(string)
+			var cantInsumoConsumida float64
+			switch v := it["cantidad_insumo_consumida"].(type) {
+			case float64:
+				cantInsumoConsumida = v
+			case int:
+				cantInsumoConsumida = float64(v)
+			}
+
+			if insumoUtilizadoID != "" && cantInsumoConsumida > 0 {
+				if insumo, okInsumo := s.data.Products[insumoUtilizadoID]; okInsumo {
+					insumo.StockActual += cantInsumoConsumida
+					insumo.TotalUnidadesVendidas = math.Max(0, insumo.TotalUnidadesVendidas-cantInsumoConsumida)
+					insumo.VentasUltimos30Dias = math.Max(0, insumo.VentasUltimos30Dias-cantInsumoConsumida)
+					insumo.UpdatedAt = now
+					s.data.Products[insumoUtilizadoID] = insumo
+				}
+				continue
+			}
+
 			if p, ok := s.data.Products[prodID]; ok {
-				p.StockActual += qty
-				p.TotalUnidadesVendidas = math.Max(0, p.TotalUnidadesVendidas-qty)
-				p.VentasUltimos30Dias = math.Max(0, p.VentasUltimos30Dias-qty)
-				p.UpdatedAt = time.Now().UTC()
-				s.data.Products[prodID] = p
+				if p.EsServicio == 0 {
+					p.StockActual += qty
+					p.TotalUnidadesVendidas = math.Max(0, p.TotalUnidadesVendidas-qty)
+					p.VentasUltimos30Dias = math.Max(0, p.VentasUltimos30Dias-qty)
+					p.UpdatedAt = now
+					s.data.Products[prodID] = p
+				} else if p.InsumoVinculadoID != nil && *p.InsumoVinculadoID != "" {
+					insumoID := *p.InsumoVinculadoID
+					if insumo, okInsumo := s.data.Products[insumoID]; okInsumo {
+						cantInsumo := p.CantidadInsumo
+						if cantInsumo <= 0 {
+							cantInsumo = 1.0
+						}
+						restTotal := qty * cantInsumo
+						insumo.StockActual += restTotal
+						insumo.TotalUnidadesVendidas = math.Max(0, insumo.TotalUnidadesVendidas-restTotal)
+						insumo.VentasUltimos30Dias = math.Max(0, insumo.VentasUltimos30Dias-restTotal)
+						insumo.UpdatedAt = now
+						s.data.Products[insumoID] = insumo
+					}
+				}
 			}
 		}
 	}

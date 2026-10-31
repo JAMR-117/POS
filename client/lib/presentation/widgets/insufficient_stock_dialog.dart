@@ -60,6 +60,7 @@ class InsufficientStockDialog extends StatelessWidget {
         return KeyEventResult.ignored;
       },
       child: AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 10),
         title: Row(
@@ -81,12 +82,16 @@ class InsufficientStockDialog extends StatelessWidget {
             ),
           ],
         ),
-        content: SizedBox(
-          width: 480,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 480,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Text(
                 productName,
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1F4E79)),
@@ -167,6 +172,7 @@ class InsufficientStockDialog extends StatelessWidget {
                 style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
             ],
+          ),
           ),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),

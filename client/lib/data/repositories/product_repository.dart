@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:math';
 import 'package:sqflite/sqflite.dart';
+import '../../core/department_theme.dart';
+import '../../core/string_utils.dart';
 import '../local/database_helper.dart';
 import '../local/models.dart';
 
@@ -69,6 +71,18 @@ class ProductRepository {
     return results.map((row) => Product.fromMap(row)).toList();
   }
 
+  /// Retorna los servicios configurables cuyos departamentos_aplicables incluyan [departamento] o 'Todos'.
+  Future<List<Product>> getApplicableServicesForDepartment(String departamento) async {
+    final db = await _dbHelper.database;
+    final results = await db.query(
+      'productos',
+      where: 'es_servicio = 1',
+      orderBy: 'precio_venta ASC, nombre ASC',
+    );
+    final allServices = results.map((row) => Product.fromMap(row)).toList();
+    return allServices.where((srv) => srv.appliesToDepartment(departamento)).toList();
+  }
+
   /// Búsqueda y filtrado exhaustivo 100% Offline para InventoryScreen
   Future<List<Product>> searchProducts({
     String query = '',
@@ -81,14 +95,14 @@ class ProductRepository {
     final db = await _dbHelper.database;
     final cleanQuery = query.trim();
     final bool isDeepSearch = cleanQuery.startsWith('%');
-    final String term = isDeepSearch ? cleanQuery.substring(1).trim() : cleanQuery;
+    final String term = isDeepSearch ? cleanQuery.safeSub(1).trim() : cleanQuery;
 
     final List<String> whereClauses = [];
     final List<dynamic> whereArgs = [];
 
     if (term.isNotEmpty) {
       if (term.toLowerCase().startsWith('molde:')) {
-        final moldVal = term.substring(6).trim().toUpperCase();
+        final moldVal = term.safeSub(6).trim().toUpperCase();
         whereClauses.add('UPPER(codigo_equivalencia) = ?');
         whereArgs.add(moldVal);
       } else if (isDeepSearch) {
@@ -255,7 +269,8 @@ class ProductRepository {
           'precio_cerrajero': (row['precio_cerrajero'] as num?)?.toDouble(),
           'precio_taller': (row['precio_taller'] as num?)?.toDouble(),
           'porcentaje_impuesto': (row['porcentaje_impuesto'] as num?)?.toDouble() ?? 0.16,
-          'departamento': row['departamento']?.toString() ?? 'General',
+          'departamento': row['departamento']?.toString() ?? 'Residencial',
+          'departamentos_aplicables': row['departamentos_aplicables']?.toString() ?? 'Todos',
           'stock_actual': stockVal,
           'stock_minimo': stockMinVal,
           'es_a_granel': esGranelVal,
@@ -279,7 +294,14 @@ class ProductRepository {
   Future<List<String>> getDepartmentNames() async {
     final db = await _dbHelper.database;
     final results = await db.query('departamentos', columns: ['nombre'], orderBy: 'nombre ASC');
-    return results.map((r) => r['nombre'] as String).toList();
+    final fromDb = results.map((r) => (r['nombre'] as String).trim()).where((s) => s.isNotEmpty).toSet();
+    final ordered = <String>[...kAllStandardDepartments];
+    for (final d in fromDb) {
+      if (!ordered.contains(d)) {
+        ordered.add(d);
+      }
+    }
+    return ordered;
   }
 
   /// Retorna listado de ubicaciones/gavetas únicas configuradas en el catálogo

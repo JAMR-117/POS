@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import '../../data/inventory/inventory_api_client.dart';
 import '../../data/local/database_helper.dart';
@@ -32,8 +33,9 @@ class AlertsController extends ChangeNotifier {
   int get criticalCount => _alerts.where((a) => a.stockActual <= 0).length;
 
   /// Cantidad de productos próximos a quebrar stock comercialmente
-  int get warningCount =>
-      _alerts.where((a) => a.stockActual > 0 && (a.stockActual <= a.stockMinimo || a.diasRestantes <= runwayDaysThreshold)).length;
+  int get warningCount => _alerts
+      .where((a) => a.stockActual > 0 && (a.stockActual <= a.stockMinimo || a.diasRestantes <= runwayDaysThreshold))
+      .length;
 
   /// Carga o refresca las alertas utilizando cálculo 100% local en SQLite (Offline-First)
   Future<void> loadAlerts({String? tiendaId, bool silent = false}) async {
@@ -44,13 +46,11 @@ class AlertsController extends ChangeNotifier {
     }
 
     try {
-      // 1. Cálculo 100% Offline-First directo sobre la base SQLite local
       final localAlerts = await _calculateLocalStockAlerts();
       _alerts = localAlerts;
       _errorMessage = null;
       _lastFetchTime = DateTime.now();
     } catch (e) {
-      // En caso de error local imprevisto, intentar como fallback el backend si fue configurado
       final client = _apiClient;
       if (client != null) {
         try {
@@ -77,17 +77,18 @@ class AlertsController extends ChangeNotifier {
     final db = await _dbHelper.database;
     final thirtyDaysAgoIso = DateTime.now().subtract(const Duration(days: 30)).toIso8601String();
 
-    // 1. Sumar ventas directas de los últimos 30 días
+    final Map<String, double> sales30dMap = {};
+    final Map<String, DateTime> lastSaleMap = {};
+
+    // 1. Sumar ventas directas de productos físicos en los últimos 30 días
     final directSales = await db.rawQuery('''
       SELECT dv.producto_id, SUM(dv.cantidad) as total_vendido, MAX(v.fecha_venta) as ultima_fecha
       FROM detalles_venta dv
       JOIN ventas v ON dv.venta_id = v.id
-      WHERE v.fecha_venta >= ? AND v.estatus != 'cancelado'
+      JOIN productos p ON dv.producto_id = p.id
+      WHERE v.fecha_venta >= ? AND v.estatus != 'cancelado' AND p.es_servicio = 0
       GROUP BY dv.producto_id
     ''', [thirtyDaysAgoIso]);
-
-    final Map<String, double> sales30dMap = {};
-    final Map<String, DateTime> lastSaleMap = {};
 
     for (final row in directSales) {
       final pid = row['producto_id'] as String?;
@@ -102,24 +103,23 @@ class AlertsController extends ChangeNotifier {
       }
     }
 
-    // 2. Sumar consumo de insumos derivados de servicios en los últimos 30 días
+    // 2A. Sumar consumo dinámico de llaves físicas usadas en Servicios (Dynamic Runtime BOM)
     try {
-      final insumoSales = await db.rawQuery('''
-        SELECT p.insumo_vinculado_id as insumo_id, 
-               SUM(dv.cantidad * COALESCE(p.cantidad_insumo, 1.0)) as total_insumo, 
+      final dynamicInsumoSales = await db.rawQuery('''
+        SELECT dv.insumo_utilizado_id as insumo_id,
+               SUM(dv.cantidad_insumo_consumida) as total_insumo,
                MAX(v.fecha_venta) as ultima_fecha
         FROM detalles_venta dv
         JOIN ventas v ON dv.venta_id = v.id
-        JOIN productos p ON dv.producto_id = p.id
-        WHERE v.fecha_venta >= ? 
-          AND v.estatus != 'cancelado' 
-          AND p.es_servicio = 1 
-          AND p.insumo_vinculado_id IS NOT NULL 
-          AND p.insumo_vinculado_id != ''
-        GROUP BY p.insumo_vinculado_id
+        WHERE v.fecha_venta >= ?
+          AND v.estatus != 'cancelado'
+          AND dv.insumo_utilizado_id IS NOT NULL
+          AND dv.insumo_utilizado_id != ''
+          AND dv.cantidad_insumo_consumida > 0
+        GROUP BY dv.insumo_utilizado_id
       ''', [thirtyDaysAgoIso]);
 
-      for (final row in insumoSales) {
+      for (final row in dynamicInsumoSales) {
         final iid = row['insumo_id'] as String?;
         if (iid != null) {
           final cant = (row['total_insumo'] as num?)?.toDouble() ?? 0.0;
@@ -133,9 +133,41 @@ class AlertsController extends ChangeNotifier {
           }
         }
       }
-    } catch (_) {
-      // Ignorar si la tabla o relación está vacía
-    }
+    } catch (_) {}
+
+    // 2B. Compatibilidad legacy: servicios antiguos con insumo fijo
+    try {
+      final legacyInsumoSales = await db.rawQuery('''
+        SELECT p.insumo_vinculado_id as insumo_id, 
+               SUM(dv.cantidad * COALESCE(p.cantidad_insumo, 1.0)) as total_insumo, 
+               MAX(v.fecha_venta) as ultima_fecha
+        FROM detalles_venta dv
+        JOIN ventas v ON dv.venta_id = v.id
+        JOIN productos p ON dv.producto_id = p.id
+        WHERE v.fecha_venta >= ? 
+          AND v.estatus != 'cancelado' 
+          AND p.es_servicio = 1 
+          AND (dv.insumo_utilizado_id IS NULL OR dv.insumo_utilizado_id = '')
+          AND p.insumo_vinculado_id IS NOT NULL 
+          AND p.insumo_vinculado_id != ''
+        GROUP BY p.insumo_vinculado_id
+      ''', [thirtyDaysAgoIso]);
+
+      for (final row in legacyInsumoSales) {
+        final iid = row['insumo_id'] as String?;
+        if (iid != null) {
+          final cant = (row['total_insumo'] as num?)?.toDouble() ?? 0.0;
+          sales30dMap[iid] = (sales30dMap[iid] ?? 0.0) + cant;
+          final fechaStr = row['ultima_fecha'] as String?;
+          if (fechaStr != null) {
+            final dt = DateTime.tryParse(fechaStr);
+            if (dt != null && (lastSaleMap[iid] == null || dt.isAfter(lastSaleMap[iid]!))) {
+              lastSaleMap[iid] = dt;
+            }
+          }
+        }
+      }
+    } catch (_) {}
 
     // 3. Consultar todos los productos físicos (es_servicio = 0)
     final prodRows = await db.query(
@@ -149,7 +181,9 @@ class AlertsController extends ChangeNotifier {
       final id = row['id'] as String;
       final nombre = row['nombre'] as String? ?? '';
       final descripcion = row['descripcion'] as String? ?? nombre;
-      final fullDesc = nombre.isNotEmpty ? (descripcion.isNotEmpty && descripcion != nombre ? '$nombre ($descripcion)' : nombre) : descripcion;
+      final fullDesc = nombre.isNotEmpty
+          ? (descripcion.isNotEmpty && descripcion != nombre ? '$nombre ($descripcion)' : nombre)
+          : descripcion;
       final double stockActual = (row['stock_actual'] as num?)?.toDouble() ?? 0.0;
       final double stockMinimo = (row['stock_minimo'] as num?)?.toDouble() ?? 5.0;
       final String? barcode = row['codigo_barras'] as String?;
@@ -159,10 +193,20 @@ class AlertsController extends ChangeNotifier {
       final double baseTotalVendidas = (row['total_unidades_vendidas'] as num?)?.toDouble() ?? 0.0;
       final String? ubicacion = row['ubicacion'] as String?;
       final String? molde = row['codigo_equivalencia'] as String?;
+      final String? ultVentaProdStr = row['ultima_venta_at'] as String?;
 
       final double localVentas30d = sales30dMap[id] ?? 0.0;
-      final double ventas30d = baseVentas30d + localVentas30d;
-      final double totalVendidas = baseTotalVendidas + localVentas30d;
+      // processSaleTransaction mantiene actualizadas las columnas ventas_ultimos_30dias y total_unidades_vendidas
+      final double ventas30d = math.max(baseVentas30d, localVentas30d);
+      final double totalVendidas = math.max(baseTotalVendidas, ventas30d);
+
+      DateTime? ultimaVenta = lastSaleMap[id];
+      if (ultVentaProdStr != null && ultVentaProdStr.isNotEmpty) {
+        final parsed = DateTime.tryParse(ultVentaProdStr);
+        if (parsed != null && (ultimaVenta == null || parsed.isAfter(ultimaVenta))) {
+          ultimaVenta = parsed;
+        }
+      }
 
       final double velocidadDiaria = ventas30d / 30.0;
       final double diasRestantes = velocidadDiaria > 0.0
@@ -196,7 +240,7 @@ class AlertsController extends ChangeNotifier {
             velocidadDiaria: velocidadDiaria,
             diasRestantes: diasRestantes,
             nivelRiesgo: nivel,
-            ultimaVentaAt: lastSaleMap[id],
+            ultimaVentaAt: ultimaVenta,
             totalUnidadesVendidas: totalVendidas,
             ubicacion: ubicacion,
             codigoEquivalencia: molde,
@@ -205,8 +249,6 @@ class AlertsController extends ChangeNotifier {
       }
     }
 
-    // Ordenar estrictamente por popularidad comercial:
-    // ventas_ultimos_30dias DESC, total_unidades_vendidas DESC, stock_actual <= 0 primero, stock_actual ASC
     result.sort((a, b) {
       final cmp30d = b.ventasUltimos30Dias.compareTo(a.ventasUltimos30Dias);
       if (cmp30d != 0) return cmp30d;

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:client/core/string_utils.dart';
 import 'package:client/data/local/models.dart';
 import 'package:client/presentation/controllers/cart_controller.dart';
 
@@ -207,6 +208,50 @@ void main() {
       expect(cart.items.first.nombre, 'Llave Virgen R-52');
       expect(cart.items.first.cantidad, 3.0);
       expect(cart.total, 45.00);
+    });
+
+    test('Dynamic Runtime BOM vincula servicio por departamento a llave física y calcula costo real', () {
+      expect('R-52'.safePrefix(8), 'R-52');
+
+      final servicioDupRes = Product(
+        id: 'SRV-DUP-RES',
+        sku: 'SRV-DUP-RES',
+        nombre: 'Duplicado de Llave Residencial',
+        descripcion: 'Corte y duplicado residencial',
+        departamento: 'Servicios',
+        departamentosAplicables: 'Residencial,Cerraduras y Candados',
+        precioCompra: 0.0,
+        precioVenta: 35.0,
+        precioCerrajero: 20.0,
+        precioTaller: 25.0,
+        precioMayoreo: 20.0,
+        stockActual: 0.0,
+        esServicio: true,
+      );
+
+      expect(servicioDupRes.appliesToDepartment('Residencial'), true);
+      expect(servicioDupRes.appliesToDepartment('Automotriz'), false);
+
+      cart.addDynamicServiceItem(
+        service: servicioDupRes,
+        insumo: llaveAlba,
+        precioCobrado: 35.0,
+        etiquetaPrecio: 'Público',
+        cantidadInsumoConsumida: 2.0,
+      );
+
+      expect(cart.items.length, 1);
+      final item = cart.items.first;
+      expect(item.hasDynamicInsumo, true);
+      expect(item.insumoUtilizadoId, 'prod-alba-r52');
+      expect(item.cantidadInsumoConsumida, 2.0);
+      // Costo histórico = 3.50 * 2 piezas = 7.00
+      expect(item.costoHistorico, 7.00);
+      expect(item.totalLinea, 35.00);
+      // Concepto comercial limpio sin ubicación de gaveta
+      expect(item.nombre, 'Duplicado de Llave Residencial (Llave Virgen R-52 Alba)');
+      expect(item.descripcion.contains('Tablero'), false);
+      expect(cart.getReservedQuantityInCart('prod-alba-r52'), 2.0);
     });
   });
 }

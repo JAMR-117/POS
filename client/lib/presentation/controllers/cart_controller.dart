@@ -69,12 +69,15 @@ class CartController extends ChangeNotifier {
     return product.stockActual;
   }
 
-  /// Retorna la cantidad ya apartada en el carrito para un producto o insumo vinculado.
+  /// Retorna la cantidad total ya apartada en el carrito para un producto físico
+  /// (sumando tanto ventas directas como servicios vinculados dinámicamente a esa llave).
   double getReservedQuantityInCart(String productId) {
     double total = 0.0;
     for (final item in _items) {
-      if (item.productoId == productId) {
+      if (!item.esServicio && item.productoId == productId) {
         total += item.cantidad;
+      } else if (item.hasDynamicInsumo && item.insumoUtilizadoId == productId) {
+        total += item.cantidadInsumoConsumida;
       } else if (item.esServicio && item.insumoVinculadoId == productId) {
         final factor = (item.cantidadInsumo > 0) ? item.cantidadInsumo : 1.0;
         total += item.cantidad * factor;
@@ -115,10 +118,23 @@ class CartController extends ChangeNotifier {
   // LÓGICA DE PRECIOS MULTI-NIVEL Y MAYOREO
   // ---------------------------------------------------------------------------
 
+  double determineServiceSuggestedPrice(Product service, {String? targetTier}) {
+    final tier = targetTier ?? _selectedClientTier;
+    if (tier == 'Cerrajero' && service.precioCerrajero != null && service.precioCerrajero! > 0) {
+      return service.precioCerrajero!;
+    }
+    if (tier == 'Taller' && service.precioTaller != null && service.precioTaller! > 0) {
+      return service.precioTaller!;
+    }
+    if (tier == 'Mayoreo' && service.precioMayoreo != null && service.precioMayoreo! > 0) {
+      return service.precioMayoreo!;
+    }
+    return service.precioVenta;
+  }
+
   double _determineApplicablePrice(Product product, double currentQuantity, {String? targetTier}) {
     final tier = targetTier ?? _selectedClientTier;
 
-    // Si alcanza mayoreo por volumen
     if (product.hasWholesalePrice && currentQuantity >= product.cantidadMayoreo!) {
       return product.precioMayoreo!;
     }
@@ -129,6 +145,10 @@ class CartController extends ChangeNotifier {
 
     if (tier == 'Taller' && product.precioTaller != null && product.precioTaller! > 0) {
       return product.precioTaller!;
+    }
+
+    if (tier == 'Mayoreo' && product.precioMayoreo != null && product.precioMayoreo! > 0) {
+      return product.precioMayoreo!;
     }
 
     return product.precioVenta;
@@ -146,6 +166,9 @@ class CartController extends ChangeNotifier {
     if (tier == 'Taller' && product.precioTaller != null && product.precioTaller! > 0) {
       return 'Taller';
     }
+    if (tier == 'Mayoreo' && product.precioMayoreo != null && product.precioMayoreo! > 0) {
+      return 'Mayoreo';
+    }
     return 'Público';
   }
 
@@ -158,13 +181,15 @@ class CartController extends ChangeNotifier {
 
     _productCache[product.id] = product;
 
-    final existingIndex = _items.indexWhere((item) => item.productoId == product.id);
+    final existingIndex = _items.indexWhere(
+      (item) => item.productoId == product.id && !item.hasDynamicInsumo,
+    );
 
     if (existingIndex != -1) {
       final current = _items[existingIndex];
       final double newQuantity = (product.esAGranel || product.esServicio)
           ? (current.cantidad + quantity)
-          : (current.cantidad + 1.0);
+          : (current.cantidad + quantity);
 
       final String tierLabel = preferredTier ?? current.etiquetaPrecio;
       final double applicablePrice = _determineApplicablePrice(product, newQuantity, targetTier: tierLabel);
@@ -213,6 +238,64 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Agrega al ticket un Servicio vinculado dinámicamente en caja a una llave/insumo físico.
+  /// - Mantiene el concepto comercial limpio para Ticket Impreso y Cotización [F8] (sin costos ni gaveta).
+  /// - Registra `insumoUtilizadoId` y `cantidadInsumoConsumida` para descuento atómico y cálculo real de utilidad.
+  void addDynamicServiceItem({
+    required Product service,
+    required Product insumo,
+    required double precioCobrado,
+    required String etiquetaPrecio,
+    required double cantidadInsumoConsumida,
+  }) {
+    if (precioCobrado < 0 || cantidadInsumoConsumida < 0) return;
+
+    _productCache[service.id] = service;
+    _productCache[insumo.id] = insumo;
+
+    final String marcaClean = (insumo.marca ?? '').trim();
+    final bool includeMarca =
+        marcaClean.isNotEmpty && !insumo.nombre.toLowerCase().contains(marcaClean.toLowerCase());
+    final String insumoDisplay =
+        includeMarca ? '${insumo.nombre} $marcaClean' : insumo.nombre;
+
+    final String commercialTitle = '${service.nombre} ($insumoDisplay)';
+    final String insumoShortCode = (insumo.sku != null && insumo.sku!.trim().isNotEmpty)
+        ? insumo.sku!.trim()
+        : insumo.id;
+
+    final double cleanConsumida = _roundToDecimals(cantidadInsumoConsumida, 3);
+    final double costoRealInsumo = _roundToDecimals(insumo.precioCompra * cleanConsumida, 2);
+    final double totalLinea = _roundToDecimals(precioCobrado, 2);
+
+    _items.add(
+      SaleDetailItem(
+        id: _generateLocalUUID(),
+        productoId: service.id,
+        nombre: commercialTitle,
+        descripcion: commercialTitle,
+        cantidad: 1.0,
+        precioHistorico: precioCobrado,
+        costoHistorico: costoRealInsumo,
+        descuentoLinea: 0.0,
+        totalLinea: totalLinea,
+        ubicacion: insumo.ubicacion,
+        sku: service.sku,
+        marca: insumo.marca,
+        esServicio: true,
+        etiquetaPrecio: etiquetaPrecio,
+        stockDisponible: insumo.stockActual,
+        insumoUtilizadoId: insumo.id,
+        insumoUtilizadoNombre: insumoDisplay,
+        insumoUtilizadoSku: insumoShortCode,
+        cantidadInsumoConsumida: cleanConsumida,
+      ),
+    );
+
+    _clearError();
+    notifyListeners();
+  }
+
   /// Cambia el nivel de precio de una partida específica (Público, Cerrajero, Taller, Mayoreo, Manual)
   void changeItemPriceTier(String detailItemId, double newPrice, String tierLabel) {
     final index = _items.indexWhere((item) => item.id == detailItemId);
@@ -230,16 +313,59 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Actualiza directamente los parámetros operativos de una partida de servicio vinculada
+  /// (Precio unitario, cantidad de servicios y cantidad física de insumo consumida).
+  void updateServiceLine({
+    required String detailItemId,
+    required double newUnitPrice,
+    required double newQuantity,
+    required double newCantidadInsumoConsumida,
+    String? newTierLabel,
+  }) {
+    final index = _items.indexWhere((item) => item.id == detailItemId);
+    if (index == -1 || newUnitPrice < 0 || newQuantity <= 0 || newCantidadInsumoConsumida < 0) return;
+
+    final current = _items[index];
+
+    double newCostoHistorico = current.costoHistorico;
+    if (current.hasDynamicInsumo && current.insumoUtilizadoId != null) {
+      final insumoProd = _productCache[current.insumoUtilizadoId!];
+      if (insumoProd != null && newQuantity > 0) {
+        newCostoHistorico = (insumoProd.precioCompra * newCantidadInsumoConsumida) / newQuantity;
+      }
+    }
+
+    final double totalLinea = _calculateLineTotal(
+      newQuantity,
+      newUnitPrice,
+      current.descuentoLinea,
+    );
+
+    _items[index] = current.copyWith(
+      cantidad: _roundToDecimals(newQuantity, 3),
+      precioHistorico: newUnitPrice,
+      costoHistorico: newCostoHistorico,
+      etiquetaPrecio: newTierLabel ?? 'Manual',
+      totalLinea: _roundToDecimals(totalLinea, 2),
+      cantidadInsumoConsumida: _roundToDecimals(newCantidadInsumoConsumida, 3),
+    );
+
+    _clearError();
+    notifyListeners();
+  }
+
   /// Aplica un nivel de precio global a todos los productos del ticket con fallback estricto a precio público
   void applyGlobalPriceTier(String tierLabel) {
     _currentGlobalTier = tierLabel;
 
     for (int i = 0; i < _items.length; i++) {
       final current = _items[i];
+      if (current.productoId == 'ART-COMUN') continue;
+
       final product = _productCache[current.productoId];
 
       double applicablePrice = current.precioHistorico;
-      String appliedLabel = 'Público';
+      String appliedLabel = current.etiquetaPrecio;
 
       if (product != null) {
         if (tierLabel == 'Cerrajero') {
@@ -267,12 +393,7 @@ class CartController extends ChangeNotifier {
             appliedLabel = 'Público';
           }
         } else {
-          // 'Público' o por defecto
           applicablePrice = product.precioVenta;
-          appliedLabel = 'Público';
-        }
-      } else {
-        if (tierLabel == 'Público') {
           appliedLabel = 'Público';
         }
       }
@@ -293,7 +414,7 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Actualiza la cantidad exacta y recalcula mayoreo
+  /// Actualiza la cantidad exacta y escala proporcionalmente el insumo consumido si aplica
   void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
       removeItem(detailItemId);
@@ -314,6 +435,17 @@ class CartController extends ChangeNotifier {
       tierLabel = _determineApplicableTierLabel(prod, newQuantity, targetTier: current.etiquetaPrecio);
     }
 
+    double newCantidadInsumoConsumida = current.cantidadInsumoConsumida;
+    double newCostoHistorico = current.costoHistorico;
+    if (current.hasDynamicInsumo && current.cantidad > 0) {
+      final ratio = newQuantity / current.cantidad;
+      newCantidadInsumoConsumida = _roundToDecimals(current.cantidadInsumoConsumida * ratio, 3);
+      final insumoProd = _productCache[current.insumoUtilizadoId!];
+      if (insumoProd != null && newQuantity > 0) {
+        newCostoHistorico = (insumoProd.precioCompra * newCantidadInsumoConsumida) / newQuantity;
+      }
+    }
+
     final double totalLinea = _calculateLineTotal(
       newQuantity,
       applicablePrice,
@@ -323,8 +455,10 @@ class CartController extends ChangeNotifier {
     _items[index] = current.copyWith(
       cantidad: _roundToDecimals(newQuantity, 3),
       precioHistorico: applicablePrice,
+      costoHistorico: newCostoHistorico,
       etiquetaPrecio: tierLabel,
       totalLinea: _roundToDecimals(totalLinea, 2),
+      cantidadInsumoConsumida: newCantidadInsumoConsumida,
     );
 
     notifyListeners();
@@ -476,6 +610,8 @@ class CartController extends ChangeNotifier {
         ventaId: _generateLocalUUID(),
         corteCajaId: corteCajaId,
         folioTicket: folioTicket,
+        clienteId: _selectedClientId,
+        clienteNombre: _selectedClientName,
         subtotal: subtotal,
         descuentoTotal: descuentoTotal,
         impuestosTotal: impuestosTotal,

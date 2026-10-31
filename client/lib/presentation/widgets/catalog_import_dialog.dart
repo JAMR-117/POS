@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:csv/csv.dart';
 
+import '../../core/file_io_helper.dart';
 import '../../data/repositories/product_repository.dart';
 
 class CatalogImportDialog extends StatefulWidget {
@@ -58,7 +58,7 @@ class _CatalogImportDialogState extends State<CatalogImportDialog> {
       if (pickedFile.bytes != null) {
         csvString = utf8.decode(pickedFile.bytes!, allowMalformed: true);
       } else if (!kIsWeb && pickedFile.path != null) {
-        csvString = await io.File(pickedFile.path!).readAsString();
+        csvString = await readLocalFile(pickedFile.path!) ?? '';
       } else {
         throw Exception('No fue posible leer el contenido del archivo seleccionado.');
       }
@@ -87,9 +87,9 @@ class _CatalogImportDialogState extends State<CatalogImportDialog> {
         csvString = await rootBundle.loadString(_assetMigratedCsvPath);
       } else {
         // En Desktop, intentar leer primero desde la ruta física local
-        final localFile = io.File(_defaultMigratedCsvPath);
-        if (localFile.existsSync()) {
-          csvString = await localFile.readAsString();
+        final localData = await readLocalFile(_defaultMigratedCsvPath);
+        if (localData != null && localData.isNotEmpty) {
+          csvString = localData;
         } else {
           // Respaldo inmediato desde assets si no está en C:\POS\migracion\
           csvString = await rootBundle.loadString(_assetMigratedCsvPath);
@@ -237,6 +237,7 @@ class _CatalogImportDialogState extends State<CatalogImportDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.upload_file, color: Color(0xFF1F4E79)),
@@ -250,8 +251,12 @@ class _CatalogImportDialogState extends State<CatalogImportDialog> {
         ],
       ),
       content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: Column(
+        constraints: BoxConstraints(
+          maxWidth: 480,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -369,6 +374,7 @@ class _CatalogImportDialogState extends State<CatalogImportDialog> {
           ],
         ),
       ),
+    ),
       actions: [
         if (!_isProcessing)
           TextButton(

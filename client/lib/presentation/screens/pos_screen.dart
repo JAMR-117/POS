@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 // Modelos y Repositorios Locales
+import '../../core/department_theme.dart';
+import '../../core/string_utils.dart';
 import '../../data/local/models.dart';
 import '../../data/sync/sync_worker.dart';
 import '../../data/inventory/inventory_api_client.dart';
@@ -34,6 +36,8 @@ import '../widgets/client_selection_dialog.dart';
 import '../widgets/advanced_product_search_dialog.dart';
 import '../widgets/cash_movement_dialog.dart';
 import '../widgets/insufficient_stock_dialog.dart';
+import '../widgets/product_or_service_action_dialog.dart';
+import '../widgets/edit_service_line_dialog.dart';
 
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
@@ -110,15 +114,114 @@ class _PosScreenState extends State<PosScreen> {
   /// Mantiene anclado el foco en la barra de búsqueda / escáner
   void _refocusSearch() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_searchFocusNode.hasFocus && mounted) {
+      if (!mounted) return;
+      final modalRoute = ModalRoute.of(context);
+      if (modalRoute != null && !modalRoute.isCurrent) return;
+      if (!_searchFocusNode.hasFocus) {
         _searchFocusNode.requestFocus();
       }
     });
   }
 
+  /// Flujo interactivo Fase 4: Al seleccionar cualquier artículo del catálogo o [F1],
+  /// si es un Producto Físico despliega `ProductOrServiceActionDialog` ("Solo Producto [Enter]" vs "Aplicar Servicio").
+  Future<void> _handleSelectedCatalogItem(Product product) async {
+    if (product.esServicio || product.id == 'ART-COMUN') {
+      await _tryAddProduct(product);
+      return;
+    }
+
+    final double reservedInCart = widget.cartController.getReservedQuantityInCart(product.id);
+    if (!mounted) return;
+
+    final result = await ProductOrServiceActionDialog.show(
+      context: context,
+      product: product,
+      salesRepository: widget.cartController.salesRepository,
+      initialClientTier: widget.cartController.selectedClientTier,
+      reservedInCart: reservedInCart,
+    );
+
+    if (result == null || !mounted) {
+      _refocusSearch();
+      return;
+    }
+
+    if (result.isDirectProduct) {
+      await _tryAddProduct(product, quantity: 1.0);
+      return;
+    }
+
+    final service = result.selectedService;
+    if (service == null) {
+      _refocusSearch();
+      return;
+    }
+
+    final double insumoQty = result.insumoQuantityToDeduct;
+    final double totalRequired = reservedInCart + insumoQty;
+
+    // Validación Soft-Stop del stock físico de la llave/insumo utilizado
+    if (insumoQty > 0 && totalRequired > product.stockActual) {
+      if (!mounted) return;
+      final decision = await InsufficientStockDialog.show(
+        context: context,
+        productName: '${product.nombre} (Insumo para ${service.nombre})',
+        currentStock: product.stockActual,
+        requestedQuantity: totalRequired,
+        location: product.ubicacion,
+      );
+
+      if (decision == InsufficientStockDecision.allowNegative) {
+        widget.cartController.addDynamicServiceItem(
+          service: service,
+          insumo: product,
+          precioCobrado: result.servicePrice,
+          etiquetaPrecio: result.priceTierLabel,
+          cantidadInsumoConsumida: insumoQty,
+        );
+      } else if (decision == InsufficientStockDecision.adjustToLimit) {
+        final double remaining = product.stockActual - reservedInCart;
+        if (remaining <= 0) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Operación cancelada: Sin existencias disponibles de "${product.nombre}" para el servicio.'),
+                backgroundColor: Colors.orange.shade800,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else {
+          widget.cartController.addDynamicServiceItem(
+            service: service,
+            insumo: product,
+            precioCobrado: result.servicePrice,
+            etiquetaPrecio: result.priceTierLabel,
+            cantidadInsumoConsumida: remaining,
+          );
+        }
+      }
+    } else {
+      widget.cartController.addDynamicServiceItem(
+        service: service,
+        insumo: product,
+        precioCobrado: result.servicePrice,
+        etiquetaPrecio: result.priceTierLabel,
+        cantidadInsumoConsumida: insumoQty,
+      );
+    }
+
+    _refocusSearch();
+  }
+
   Future<void> _tryAddProduct(Product product, {double quantity = 1.0}) async {
-    final existingIndex = widget.cartController.items.indexWhere((i) => i.productoId == product.id);
-    final double currentInCart = existingIndex != -1 ? widget.cartController.items[existingIndex].cantidad : 0.0;
+    final existingIndex = widget.cartController.items.indexWhere(
+      (i) => i.productoId == product.id && !i.hasDynamicInsumo,
+    );
+    final double currentInCart = product.esServicio
+        ? (existingIndex != -1 ? widget.cartController.items[existingIndex].cantidad : 0.0)
+        : widget.cartController.getReservedQuantityInCart(product.id);
     final double targetTotal = currentInCart + quantity;
 
     final effectiveStock = await widget.cartController.getEffectiveStockForProduct(product);
@@ -136,7 +239,12 @@ class _PosScreenState extends State<PosScreen> {
       if (decision == InsufficientStockDecision.allowNegative) {
         widget.cartController.addProduct(product, quantity: quantity);
       } else if (decision == InsufficientStockDecision.adjustToLimit) {
-        if (effectiveStock <= 0) {
+        final double otherReserved = !product.esServicio
+            ? (currentInCart - (existingIndex != -1 ? widget.cartController.items[existingIndex].cantidad : 0.0))
+            : 0.0;
+        final double maxDirectAllowed = effectiveStock - otherReserved;
+
+        if (maxDirectAllowed <= 0) {
           if (existingIndex != -1) {
             widget.cartController.removeItem(widget.cartController.items[existingIndex].id);
           }
@@ -151,9 +259,9 @@ class _PosScreenState extends State<PosScreen> {
           }
         } else {
           if (existingIndex != -1) {
-            widget.cartController.updateQuantity(widget.cartController.items[existingIndex].id, effectiveStock);
+            widget.cartController.updateQuantity(widget.cartController.items[existingIndex].id, maxDirectAllowed);
           } else {
-            widget.cartController.addProduct(product, quantity: effectiveStock);
+            widget.cartController.addProduct(product, quantity: maxDirectAllowed);
           }
         }
       }
@@ -166,6 +274,49 @@ class _PosScreenState extends State<PosScreen> {
   Future<void> _tryUpdateQuantity(SaleDetailItem item, double newQuantity) async {
     if (newQuantity <= 0) {
       widget.cartController.removeItem(item.id);
+      _refocusSearch();
+      return;
+    }
+
+    // Si es un servicio con insumo dinámico vinculado, validar el stock físico de la llave
+    if (item.hasDynamicInsumo) {
+      final insumoId = item.insumoUtilizadoId!;
+      Product? insumo = widget.cartController.getProductFromCache(insumoId);
+      if (insumo == null) {
+        insumo = await widget.cartController.salesRepository.findProductById(insumoId);
+        if (insumo != null) widget.cartController.cacheProduct(insumo);
+      }
+      final double stockInsumo = insumo?.stockActual ?? item.stockDisponible;
+      final double factor = item.cantidad > 0 ? (item.cantidadInsumoConsumida / item.cantidad) : 1.0;
+      final double projectedLineInsumo = newQuantity * factor;
+      final double otherReserved =
+          widget.cartController.getReservedQuantityInCart(insumoId) - item.cantidadInsumoConsumida;
+      final double totalRequired = otherReserved + projectedLineInsumo;
+
+      if (factor > 0 && totalRequired > stockInsumo) {
+        if (!mounted) return;
+        final decision = await InsufficientStockDialog.show(
+          context: context,
+          productName: '${item.insumoUtilizadoNombre ?? insumoId} (Insumo)',
+          currentStock: stockInsumo,
+          requestedQuantity: totalRequired,
+          location: item.ubicacion,
+        );
+
+        if (decision == InsufficientStockDecision.allowNegative) {
+          widget.cartController.updateQuantity(item.id, newQuantity);
+        } else if (decision == InsufficientStockDecision.adjustToLimit) {
+          final double maxInsumoForLine = stockInsumo - otherReserved;
+          final double maxServiceQty = factor > 0 ? (maxInsumoForLine / factor).floorToDouble() : newQuantity;
+          if (maxServiceQty <= 0) {
+            widget.cartController.removeItem(item.id);
+          } else {
+            widget.cartController.updateQuantity(item.id, maxServiceQty);
+          }
+        }
+      } else {
+        widget.cartController.updateQuantity(item.id, newQuantity);
+      }
       _refocusSearch();
       return;
     }
@@ -227,7 +378,7 @@ class _PosScreenState extends State<PosScreen> {
     if (results.length > 1 && mounted) {
       _showIncrementalSearchResults(results);
     } else if (results.length == 1 && mounted) {
-      await _tryAddProduct(results.first);
+      await _handleSelectedCatalogItem(results.first);
     } else if (results.isEmpty && mounted) {
       final wantsToAdd = await showDialog<bool>(
         context: context,
@@ -250,7 +401,7 @@ class _PosScreenState extends State<PosScreen> {
         final newProduct = await QuickProductFormDialog.show(context, text, productRepo);
         
         if (newProduct != null && mounted) {
-          await _tryAddProduct(newProduct);
+          await _handleSelectedCatalogItem(newProduct);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Producto guardado y agregado al ticket.'), backgroundColor: Colors.green),
@@ -268,6 +419,7 @@ class _PosScreenState extends State<PosScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: Row(
           children: [
             const Icon(Icons.key, color: Color(0xFF1F4E79), size: 20),
@@ -275,9 +427,11 @@ class _PosScreenState extends State<PosScreen> {
             Text('Coincidencias y Variantes (${products.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: SizedBox(
-          width: 600,
-          height: 380,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 600,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+          ),
           child: ListView.separated(
             itemCount: products.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
@@ -324,7 +478,9 @@ class _PosScreenState extends State<PosScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
+                        DepartmentBadge(departamento: prod.departamento, compact: true),
                         if (prod.sku != null && prod.sku!.isNotEmpty)
                           Text('Clave/SKU: ${prod.sku}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1F4E79))),
                         if (prod.codigoEquivalencia != null && prod.codigoEquivalencia!.isNotEmpty)
@@ -396,7 +552,7 @@ class _PosScreenState extends State<PosScreen> {
                 ),
                 onTap: () async {
                   Navigator.of(ctx).pop();
-                  await _tryAddProduct(prod);
+                  await _handleSelectedCatalogItem(prod);
                 },
               );
             },
@@ -464,10 +620,15 @@ class _PosScreenState extends State<PosScreen> {
     final newQty = await showDialog<double>(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: Text('Modificar Cantidad: ${item.nombre}', style: const TextStyle(fontSize: 16)),
-        content: SizedBox(
-          width: 250,
-          child: TextField(
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 320,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+          ),
+          child: SingleChildScrollView(
+            child: TextField(
             controller: controller,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -481,6 +642,7 @@ class _PosScreenState extends State<PosScreen> {
               final parsed = double.tryParse(val);
               Navigator.pop(ctx, parsed);
             },
+          ),
           ),
         ),
         actions: [
@@ -536,7 +698,7 @@ class _PosScreenState extends State<PosScreen> {
           ),
         );
 
-        final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+        final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().safeSub(7)}';
         
         final ticketData = TicketPrintData(
           negocioNombre: widget.nombreNegocio,
@@ -600,6 +762,7 @@ class _PosScreenState extends State<PosScreen> {
     final alias = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: const Row(
           children: [
             Icon(Icons.pause_circle_outline, color: Color(0xFF1F4E79)),
@@ -607,7 +770,13 @@ class _PosScreenState extends State<PosScreen> {
             Text('Pausar Ticket [F6]', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: Column(
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 420,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -630,7 +799,9 @@ class _PosScreenState extends State<PosScreen> {
             ),
           ],
         ),
-        actions: [
+      ),
+      ),
+      actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Cancelar [Esc]'),
@@ -678,6 +849,7 @@ class _PosScreenState extends State<PosScreen> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: Row(
           children: [
             const Icon(Icons.pause_circle_outline, color: Color(0xFFE65100)),
@@ -685,9 +857,11 @@ class _PosScreenState extends State<PosScreen> {
             Text('Tickets en Espera [F7] (${held.length})', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
           ],
         ),
-        content: SizedBox(
-          width: 520,
-          height: 320,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 520,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
+          ),
           child: ListView.separated(
             itemCount: held.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
@@ -738,7 +912,7 @@ class _PosScreenState extends State<PosScreen> {
       initialQuery: initialQuery,
     );
     if (selectedProduct != null && mounted) {
-      await _tryAddProduct(selectedProduct);
+      await _handleSelectedCatalogItem(selectedProduct);
     }
     _refocusSearch();
   }
@@ -790,7 +964,8 @@ class _PosScreenState extends State<PosScreen> {
   Future<void> _showPriceTierMenu(SaleDetailItem item) async {
     if (item.productoId == 'ART-COMUN') return;
 
-    final prod = await widget.cartController.salesRepository.findProductByBarcodeOrSku(item.sku ?? item.productoId);
+    final prod = await widget.cartController.salesRepository.findProductById(item.productoId) ??
+        await widget.cartController.salesRepository.findProductByBarcodeOrSku(item.sku ?? item.productoId);
     if (!mounted) return;
 
     final baseProd = prod ?? Product(
@@ -804,18 +979,30 @@ class _PosScreenState extends State<PosScreen> {
 
     final selected = await showModalBottomSheet<String>(
       context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(12))),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
         return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Seleccionar Nivel de Precio para:\n${item.nombre}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-              ),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
+              maxWidth: 540,
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      'Seleccionar Nivel de Precio para:\n${item.nombre}',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
               const SizedBox(height: 12),
               ListTile(
                 dense: true,
@@ -852,11 +1039,87 @@ class _PosScreenState extends State<PosScreen> {
                   selected: item.etiquetaPrecio == 'Mayoreo',
                   onTap: () => Navigator.pop(ctx, 'Mayoreo'),
                 ),
+              const Divider(height: 12),
+              if (item.esServicio) ...[
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.tune, color: Color(0xFF00838F)),
+                  title: const Text('Modificar precio e insumo ocupado...'),
+                  subtitle: const Text('Editar precio unitario, cantidad de servicios e insumos consumidos'),
+                  onTap: () => Navigator.pop(ctx, 'EditService'),
+                ),
+                const Divider(height: 12),
+              ],
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.edit, color: Color(0xFF37474F)),
+                title: const Text('Escribir otro precio manualmente...'),
+                selected: item.etiquetaPrecio == 'Manual',
+                onTap: () => Navigator.pop(ctx, 'Manual'),
+              ),
             ],
           ),
+        ),
+        ),
+        ),
         );
       },
     );
+
+    if (selected == 'EditService' && mounted) {
+      await EditServiceLineDialog.show(
+        context: context,
+        item: item,
+        cartController: widget.cartController,
+      );
+      _refocusSearch();
+      return;
+    }
+
+    if (selected == 'Manual' && mounted) {
+      final manualCtrl = TextEditingController(text: item.precioHistorico.toStringAsFixed(2));
+      manualCtrl.selection = TextSelection(baseOffset: 0, extentOffset: manualCtrl.text.length);
+      final manualPrice = await showDialog<double>(
+        context: context,
+        builder: (dCtx) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          title: Text('Precio Manual: ${item.nombre}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 320,
+              maxHeight: MediaQuery.sizeOf(dCtx).height * 0.75,
+            ),
+            child: SingleChildScrollView(
+              child: TextField(
+              controller: manualCtrl,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+              decoration: const InputDecoration(
+                labelText: 'Precio unitario',
+                prefixText: '\$ ',
+                border: OutlineInputBorder(),
+              ),
+              onSubmitted: (v) => Navigator.pop(dCtx, double.tryParse(v)),
+            ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(dCtx, double.tryParse(manualCtrl.text)),
+              child: const Text('Aplicar'),
+            ),
+          ],
+        ),
+      );
+      if (manualPrice != null && manualPrice >= 0) {
+        widget.cartController.changeItemPriceTier(item.id, manualPrice, 'Manual');
+      }
+      _refocusSearch();
+      return;
+    }
 
     if (selected != null) {
       double chosenPrice = baseProd.precioVenta;
@@ -870,6 +1133,7 @@ class _PosScreenState extends State<PosScreen> {
 
       widget.cartController.changeItemPriceTier(item.id, chosenPrice, selected);
     }
+    _refocusSearch();
   }
 
   void _handleLogout() {
@@ -969,20 +1233,37 @@ class _PosScreenState extends State<PosScreen> {
           child: Scaffold(
             backgroundColor: const Color(0xFFECEFF1),
             body: SafeArea(
-              child: Column(
-                children: [
-                  _buildHeaderBar(),
-                  Expanded(
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(flex: 7, child: _buildActiveTicketTable()),
-                        Expanded(flex: 3, child: _buildRightLiquidationPanel()),
-                      ],
-                    ),
-                  ),
-                  _buildKeyboardShortcutsFooter(),
-                ],
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isWide = constraints.maxWidth >= 900;
+                  return Column(
+                    children: [
+                      _buildHeaderBar(),
+                      Expanded(
+                        child: isWide
+                            ? Row(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Expanded(flex: 7, child: _buildActiveTicketTable()),
+                                  SizedBox(
+                                    width: (constraints.maxWidth * 0.28).clamp(300.0, 360.0),
+                                    child: SingleChildScrollView(
+                                      child: _buildRightLiquidationPanel(),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : Column(
+                                children: [
+                                  Expanded(child: _buildActiveTicketTable()),
+                                  _buildCompactLiquidationBar(),
+                                ],
+                              ),
+                      ),
+                      _buildKeyboardShortcutsFooter(),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -1046,12 +1327,18 @@ class _PosScreenState extends State<PosScreen> {
           ),
           const SizedBox(width: 8),
 
-          // Buscar [F1]
-          IconButton(
-            icon: const Icon(Icons.manage_search, color: Color(0xFF1F4E79)),
-            tooltip: 'Buscar [F1]',
-            onPressed: _openAdvancedProductSearch,
-          ),
+          // Iconos de acción con scroll horizontal para pantallas táctiles estrechas
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.manage_search, color: Color(0xFF1F4E79)),
+                    tooltip: 'Buscar [F1]',
+                    onPressed: _openAdvancedProductSearch,
+                  ),
 
           // Clientes y Créditos
           IconButton(
@@ -1116,6 +1403,10 @@ class _PosScreenState extends State<PosScreen> {
               icon: const Icon(Icons.lock_outline, color: Color(0xFFD32F2F)),
               tooltip: 'Bloquear Terminal / Cerrar Sesión',
               onPressed: _handleLogout,
+            ),
+          ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1376,18 +1667,63 @@ class _PosScreenState extends State<PosScreen> {
                                     if (item.sku != null && item.sku!.isNotEmpty)
                                       Text('SKU: ${item.sku}', style: const TextStyle(fontSize: 11, color: Colors.black54)),
 
-                                    // BADGE DE DISPONIBILIDAD (Stock / Servicio) - Nunca mostrar costo de compra aquí por privacidad
-                                    if (item.esServicio)
+                                    // BADGE DE DISPONIBILIDAD Y DESCUENTO DINÁMICO DE INSUMO (Nunca mostrar costo interno aquí)
+                                    if (item.esServicio) ...[
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                         decoration: BoxDecoration(
-                                          color: Colors.purple.shade50,
+                                          color: const Color(0xFFE0F7FA),
                                           borderRadius: BorderRadius.circular(3),
-                                          border: Border.all(color: Colors.purple.shade200),
+                                          border: Border.all(color: const Color(0xFF80DEEA)),
                                         ),
-                                        child: const Text('⚙️ Servicio', style: TextStyle(fontSize: 10, color: Colors.purple, fontWeight: FontWeight.bold)),
-                                      )
-                                    else
+                                        child: const Text(
+                                          '🛠️ Servicio',
+                                          style: TextStyle(fontSize: 10, color: Color(0xFF006064), fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      if (item.hasDynamicInsumo)
+                                        InkWell(
+                                          borderRadius: BorderRadius.circular(4),
+                                          onTap: () {
+                                            EditServiceLineDialog.show(
+                                              context: context,
+                                              item: item,
+                                              cartController: widget.cartController,
+                                            );
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: item.stockDisponible <= 0
+                                                  ? Colors.red.shade50
+                                                  : const Color(0xFFE8F5E9),
+                                              borderRadius: BorderRadius.circular(3),
+                                              border: Border.all(
+                                                color: item.stockDisponible <= 0
+                                                    ? Colors.red.shade300
+                                                    : const Color(0xFF81C784),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                const Icon(Icons.edit, size: 10, color: Color(0xFF1B5E20)),
+                                                const SizedBox(width: 3),
+                                                Text(
+                                                  '🔧 ✏️ Insumo ocupado: ${(item.cantidadInsumoConsumida % 1 == 0 ? item.cantidadInsumoConsumida.toInt() : item.cantidadInsumoConsumida)} pza${(item.insumoUtilizadoNombre != null && item.insumoUtilizadoNombre!.isNotEmpty) ? " (${item.insumoUtilizadoNombre})" : ""} [Cambiar]',
+                                                  style: TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: item.stockDisponible <= 0
+                                                        ? Colors.red.shade800
+                                                        : const Color(0xFF1B5E20),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                    ] else
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                         decoration: BoxDecoration(
@@ -1482,11 +1818,15 @@ class _PosScreenState extends State<PosScreen> {
                             ),
                           ),
 
-                          // Botón Eliminar Fila
+                          // Botón Eliminar Fila (Touch target >= 44x44)
                           SizedBox(
-                            width: 40,
+                            width: 44,
+                            height: 44,
                             child: IconButton(
-                              icon: const Icon(Icons.close, size: 18, color: Color(0xFFE53935)),
+                              icon: const Icon(Icons.close, size: 20, color: Color(0xFFE53935)),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                              tooltip: 'Quitar del ticket',
                               onPressed: () {
                                 widget.cartController.removeItem(item.id);
                                 _refocusSearch();
@@ -1498,6 +1838,105 @@ class _PosScreenState extends State<PosScreen> {
                     );
                   },
                 ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BARRA COMPACTA INFERIOR PARA TABLET VERTICAL / COMPACTA (< 900px)
+  // ---------------------------------------------------------------------------
+  Widget _buildCompactLiquidationBar() {
+    return AnimatedBuilder(
+      animation: widget.cartController,
+      builder: (context, _) {
+        final total = widget.cartController.total;
+        final subtotal = widget.cartController.subtotal;
+        final descuento = widget.cartController.descuentoTotal;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 6,
+                offset: const Offset(0, -3),
+              ),
+            ],
+            border: const Border(top: BorderSide(color: Color(0xFFCFD8DC))),
+          ),
+          child: Row(
+            children: [
+              // Total y desglose
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Subtotal: \$${subtotal.toStringAsFixed(2)}',
+                          style: const TextStyle(fontSize: 12, color: Colors.black54),
+                        ),
+                        if (descuento > 0) ...[
+                          const SizedBox(width: 8),
+                          Text(
+                            '-Desc: \$${descuento.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'TOTAL: \$${total.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF1F4E79),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Botón Cotizar
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1F4E79),
+                  side: const BorderSide(color: Color(0xFF1F4E79)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  minimumSize: const Size(44, 44),
+                ),
+                icon: const Icon(Icons.request_quote_outlined, size: 18),
+                label: const Text('COTIZAR [F8]', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                onPressed: widget.cartController.isEmpty ? null : _openQuoteDialog,
+              ),
+              const SizedBox(width: 8),
+              // Botón Cobrar
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2E7D32),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  minimumSize: const Size(110, 44),
+                ),
+                icon: const Icon(Icons.point_of_sale, size: 20),
+                label: const Text(
+                  'COBRAR [F12]',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                onPressed: widget.cartController.isEmpty ? null : _triggerCheckout,
               ),
             ],
           ),
@@ -1546,7 +1985,7 @@ class _PosScreenState extends State<PosScreen> {
                   Text('-\$${descuento.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, color: Color(0xFF2E7D32))),
                 ],
               ),
-              const Spacer(),
+              const SizedBox(height: 20),
 
               // Botón de Cotización / Ticket Digital [F8]
               OutlinedButton.icon(
@@ -1673,7 +2112,8 @@ class _PosScreenState extends State<PosScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        constraints: const BoxConstraints(minHeight: 38),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: backgroundColor ?? const Color(0xFF37474F),
           borderRadius: BorderRadius.circular(3),

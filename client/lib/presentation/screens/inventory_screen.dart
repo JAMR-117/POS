@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/department_theme.dart';
 import '../../data/inventory/inventory_api_client.dart';
 import '../../data/local/database_helper.dart';
 import '../../data/local/models.dart';
@@ -183,7 +184,11 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           ? items.where((p) => !p.esServicio && p.stockActual <= p.stockMinimo).toList()
           : items;
 
-      final deptos = <String>{'Todos', ...all.map((p) => p.departamento).where((d) => d.isNotEmpty)};
+      final deptos = <String>{
+        'Todos',
+        ...kAllStandardDepartments,
+        ...all.map((p) => p.departamento.trim()).where((d) => d.isNotEmpty),
+      };
       final mks = <String>{'Todas', ...all.map((p) => (p.marca != null && p.marca!.isNotEmpty) ? p.marca! : 'Genérica')};
 
       if (!mounted) return;
@@ -372,8 +377,8 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                 child: _buildCleanCatalogTable(),
               ),
 
-              // Inspector Lateral Derecho (360px)
-              if (_selectedProduct != null)
+              // Inspector Lateral Derecho (360px) solo en pantallas amplias (>= 950px)
+              if (_selectedProduct != null && MediaQuery.sizeOf(context).width >= 950)
                 _buildProductInspectorPanel(_selectedProduct!),
             ],
           ),
@@ -448,12 +453,13 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
             ),
             child: const Row(
               children: [
-                SizedBox(width: 140, child: Text('CLAVE / SKU', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 125, child: Text('CLAVE / SKU', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 Expanded(flex: 3, child: Text('PRODUCTO / SERVICIO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 155, child: Text('DEPARTAMENTO', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 SizedBox(width: 90, child: Text('MOLDE', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 100, child: Text('UBICACIÓN', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 110, child: Text('P. PÚBLICO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 115, child: Text('EXISTENCIA', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 95, child: Text('UBICACIÓN', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 105, child: Text('P. PÚBLICO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 110, child: Text('EXISTENCIA', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
               ],
             ),
           ),
@@ -471,13 +477,18 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
                 return InkWell(
                   onTap: () {
-                    setState(() {
-                      if (_selectedProduct?.id == prod.id) {
-                        _selectedProduct = null;
-                      } else {
-                        _selectedProduct = prod;
-                      }
-                    });
+                    final screenWidth = MediaQuery.sizeOf(context).width;
+                    if (screenWidth < 950) {
+                      _openInspectorBottomSheet(prod);
+                    } else {
+                      setState(() {
+                        if (_selectedProduct?.id == prod.id) {
+                          _selectedProduct = null;
+                        } else {
+                          _selectedProduct = prod;
+                        }
+                      });
+                    }
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -486,7 +497,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                       children: [
                         // 1. Clave / SKU y Marca
                         SizedBox(
-                          width: 140,
+                          width: 125,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -515,11 +526,11 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                   margin: const EdgeInsets.only(right: 6),
                                   decoration: BoxDecoration(
-                                    color: Colors.purple.shade50,
+                                    color: Colors.cyan.shade50,
                                     borderRadius: BorderRadius.circular(3),
-                                    border: Border.all(color: Colors.purple.shade200),
+                                    border: Border.all(color: Colors.cyan.shade300),
                                   ),
-                                  child: const Text('SERVICIO', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.purple)),
+                                  child: Text('SERVICIO', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.cyan.shade900)),
                                 ),
                               ],
                               Expanded(
@@ -530,6 +541,21 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                                 ),
                               ),
                             ],
+                          ),
+                        ),
+
+                        // 2.5. Departamento con Badge Distintivo por Categoría
+                        SizedBox(
+                          width: 155,
+                          child: Center(
+                            child: DepartmentBadge(
+                              departamento: prod.departamento,
+                              compact: true,
+                              onTap: () {
+                                setState(() => _selectedDepartamento = prod.departamento);
+                                _loadLocalCatalog();
+                              },
+                            ),
                           ),
                         ),
 
@@ -560,7 +586,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
                         // 4. Ubicación / Gaveta
                         SizedBox(
-                          width: 100,
+                          width: 95,
                           child: Center(
                             child: (prod.ubicacion != null && prod.ubicacion!.isNotEmpty)
                                 ? Container(
@@ -581,7 +607,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
                         // 5. Precio Público
                         SizedBox(
-                          width: 110,
+                          width: 105,
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
@@ -600,7 +626,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
                         // 6. Existencia con Semáforo
                         SizedBox(
-                          width: 115,
+                          width: 110,
                           child: Center(
                             child: isService
                                 ? const Text('Ilimitado', style: TextStyle(fontSize: 11, color: Colors.black54))
@@ -643,21 +669,59 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   }
 
   // ---------------------------------------------------------------------------
-  // PANEL INSPECTOR LATERAL DERECHO (MASTER-DETAIL ERP STYLE)
+  // MODAL BOTTOM SHEET INSPECTOR PARA TABLETS / PANTALLAS COMPACTAS (< 950px)
   // ---------------------------------------------------------------------------
-  Widget _buildProductInspectorPanel(Product p) {
+  void _openInspectorBottomSheet(Product prod) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (_, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: _buildProductInspectorPanel(prod, isBottomSheet: true, scrollController: scrollController),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // PANEL INSPECTOR LATERAL DERECHO (MASTER-DETAIL ERP STYLE / BOTTOM SHEET TABLET)
+  // ---------------------------------------------------------------------------
+  Widget _buildProductInspectorPanel(Product p, {bool isBottomSheet = false, ScrollController? scrollController}) {
     final double marginPct = p.precioVenta > 0
         ? (((p.precioVenta - p.precioCompra) / p.precioVenta) * 100)
         : 0.0;
 
     return Container(
-      width: 360,
-      margin: const EdgeInsets.only(top: 8, bottom: 8, right: 12),
+      width: isBottomSheet ? double.infinity : 360,
+      margin: isBottomSheet ? EdgeInsets.zero : const EdgeInsets.only(top: 8, bottom: 8, right: 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFCFD8DC)),
-        boxShadow: [
+        borderRadius: BorderRadius.circular(isBottomSheet ? 0 : 6),
+        border: isBottomSheet ? null : Border.all(color: const Color(0xFFCFD8DC)),
+        boxShadow: isBottomSheet ? null : [
           BoxShadow(color: Colors.black.withValues(alpha: 0.06), blurRadius: 8, offset: const Offset(-2, 0)),
         ],
       ),
@@ -667,9 +731,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           // Encabezado del Inspector
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: const BoxDecoration(
-              color: Color(0xFF263238),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(5), topRight: Radius.circular(5)),
+            decoration: BoxDecoration(
+              color: const Color(0xFF263238),
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(isBottomSheet ? 0 : 5),
+                topRight: Radius.circular(isBottomSheet ? 0 : 5),
+              ),
             ),
             child: Row(
               children: [
@@ -679,7 +746,13 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   child: Text('Inspector de Producto', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                 ),
                 InkWell(
-                  onTap: () => setState(() => _selectedProduct = null),
+                  onTap: () {
+                    if (isBottomSheet) {
+                      Navigator.pop(context);
+                    } else {
+                      setState(() => _selectedProduct = null);
+                    }
+                  },
                   child: const Icon(Icons.close, color: Colors.white, size: 18),
                 ),
               ],
@@ -689,6 +762,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           // Cuerpo de Detalles
           Expanded(
             child: ListView(
+              controller: scrollController,
               padding: const EdgeInsets.all(14),
               children: [
                 // Título y Clave
@@ -770,17 +844,36 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   ),
                 ),
 
-                // Si es un servicio con insumo vinculado
-                if (p.esServicio && p.insumoVinculadoId != null) ...[
+                // Si es un servicio configurable por departamento (Dynamic Runtime BOM)
+                if (p.esServicio) ...[
                   const Divider(height: 24),
-                  const Text('INSUMO FÍSICO VINCULADO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Text('DEPARTAMENTOS APLICABLES (VINCULACIÓN EN CAJA)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey)),
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(color: Colors.purple.shade50, borderRadius: BorderRadius.circular(4), border: Border.all(color: Colors.purple.shade200)),
-                    child: Text(
-                      'Descuenta ${p.cantidadInsumo.toStringAsFixed(0)} pz del insumo #${p.insumoVinculadoId!.substring(0, 8)} por cada duplicado.',
-                      style: TextStyle(fontSize: 11, color: Colors.purple.shade900),
+                    decoration: BoxDecoration(
+                      color: Colors.cyan.shade50,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.cyan.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Se vincula dinámicamente en caja al seleccionar llaves o insumos de:',
+                          style: TextStyle(fontSize: 11, color: Colors.cyan.shade900),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: p.departamentosAplicablesList
+                              .map((d) => d.toLowerCase() == 'todos'
+                                  ? _buildChip('✅ Todos los Departamentos', Colors.teal.shade900, Colors.white)
+                                  : DepartmentBadge(departamento: d, compact: true))
+                              .toList(),
+                        ),
+                      ],
                     ),
                   ),
                 ],
@@ -873,20 +966,29 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: Text('Entrada Rápida: ${p.nombre.isNotEmpty ? p.nombre : p.descripcion}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Stock actual en sistema: ${p.stockActual.toStringAsFixed(0)} piezas'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: qtyCtrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Cantidad a ingresar (+)', border: OutlineInputBorder()),
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 420,
+            maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Stock actual en sistema: ${p.stockActual.toStringAsFixed(0)} piezas'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: qtyCtrl,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(labelText: 'Cantidad a ingresar (+)', border: OutlineInputBorder()),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
@@ -922,6 +1024,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: const Text('¿Eliminar Producto?'),
         content: Text('Esta acción eliminará "${p.nombre.isNotEmpty ? p.nombre : p.descripcion}" del catálogo.'),
         actions: [

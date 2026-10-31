@@ -37,30 +37,34 @@ type SaleTotalsDTO struct {
 
 // SaleItemDTO mapea cada artículo vendido en el ticket
 type SaleItemDTO struct {
-	ID                string  `json:"id"`
-	ProductoID        string  `json:"producto_id"`
-	Nombre            string  `json:"nombre,omitempty"`
-	Descripcion       string  `json:"descripcion"`
-	Cantidad          float64 `json:"cantidad"` // Soporte decimal para venta a granel
-	PrecioHistorico   float64 `json:"precio_historico"`
-	CostoHistorico    float64 `json:"costo_historico"`
-	DescuentoLinea    float64 `json:"descuento_linea"`
-	TotalLinea        float64 `json:"total_linea"`
-	EsServicio        int     `json:"es_servicio,omitempty"`
-	InsumoVinculadoID *string `json:"insumo_vinculado_id,omitempty"`
-	CantidadInsumo    float64 `json:"cantidad_insumo,omitempty"`
-	EtiquetaPrecio    string  `json:"etiqueta_precio,omitempty"`
+	ID                      string  `json:"id"`
+	ProductoID              string  `json:"producto_id"`
+	Nombre                  string  `json:"nombre,omitempty"`
+	Descripcion             string  `json:"descripcion"`
+	Cantidad                float64 `json:"cantidad"` // Soporte decimal para venta a granel
+	PrecioHistorico         float64 `json:"precio_historico"`
+	CostoHistorico          float64 `json:"costo_historico"`
+	DescuentoLinea          float64 `json:"descuento_linea"`
+	TotalLinea              float64 `json:"total_linea"`
+	EsServicio              int     `json:"es_servicio,omitempty"`
+	InsumoVinculadoID       *string `json:"insumo_vinculado_id,omitempty"`
+	CantidadInsumo          float64 `json:"cantidad_insumo,omitempty"`
+	InsumoUtilizadoID       *string `json:"insumo_utilizado_id,omitempty"`
+	CantidadInsumoConsumida float64 `json:"cantidad_insumo_consumida,omitempty"`
+	EtiquetaPrecio          string  `json:"etiqueta_precio,omitempty"`
 }
 
 // SalePayload representa el payload decodificado de eventos 'VENTA_REGISTRADA'
 type SalePayload struct {
-	VentaID     string                `json:"venta_id"`
-	CorteCajaID string                `json:"corte_caja_id"`
-	FolioTicket *string               `json:"folio_ticket"`
-	Totales     SaleTotalsDTO         `json:"totales"`
-	Pagos       []PaymentBreakdownDTO `json:"pagos"`
-	Items       []SaleItemDTO         `json:"items"`
-	Timestamp   time.Time             `json:"timestamp"`
+	VentaID       string                `json:"venta_id"`
+	CorteCajaID   string                `json:"corte_caja_id"`
+	ClienteID     *string               `json:"cliente_id,omitempty"`
+	ClienteNombre *string               `json:"cliente_nombre,omitempty"`
+	FolioTicket   *string               `json:"folio_ticket"`
+	Totales       SaleTotalsDTO         `json:"totales"`
+	Pagos         []PaymentBreakdownDTO `json:"pagos"`
+	Items         []SaleItemDTO         `json:"items"`
+	Timestamp     time.Time             `json:"timestamp"`
 }
 
 // SyncBatchResponse define el contrato de respuesta JSON consumido por el SyncApiClient
@@ -155,10 +159,11 @@ type ProductPullDTO struct {
 	CantidadMayoreo       *float64   `json:"cantidad_mayoreo"`
 	StockActual           float64    `json:"stock_actual"`
 	StockMinimo           float64    `json:"stock_minimo"`
-	EsAGranel             int        `json:"es_a_granel"`
-	EsServicio            int        `json:"es_servicio"`
-	InsumoVinculadoID     *string    `json:"insumo_vinculado_id"`
-	CantidadInsumo        float64    `json:"cantidad_insumo"`
+	EsAGranel               int        `json:"es_a_granel"`
+	EsServicio              int        `json:"es_servicio"`
+	DepartamentosAplicables string     `json:"departamentos_aplicables"`
+	InsumoVinculadoID       *string    `json:"insumo_vinculado_id"`
+	CantidadInsumo          float64    `json:"cantidad_insumo"`
 	VentasUltimos30Dias   float64    `json:"ventas_ultimos_30dias"`
 	TotalUnidadesVendidas float64    `json:"total_unidades_vendidas"`
 	UltimaVentaAt         *time.Time `json:"ultima_venta_at"`

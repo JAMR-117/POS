@@ -13,6 +13,7 @@ class Product {
   final double? precioTaller; // Nivel 3: Taller Automotriz / Especial
   final double porcentajeImpuesto;
   final String departamento;
+  final String departamentosAplicables;
   final double stockActual;
   final double stockMinimo; // Alerta de reabastecimiento
   final bool esAGranel;
@@ -36,7 +37,8 @@ class Product {
     this.precioCerrajero,
     this.precioTaller,
     this.porcentajeImpuesto = 0.0,
-    this.departamento = 'General',
+    this.departamento = 'Residencial',
+    this.departamentosAplicables = 'Todos',
     required this.stockActual,
     this.stockMinimo = 5.0,
     this.esAGranel = false,
@@ -58,9 +60,33 @@ class Product {
       insumoVinculadoId != null &&
       insumoVinculadoId!.trim().isNotEmpty;
 
+  /// Lista limpia de departamentos aplicables para servicios configurables.
+  List<String> get departamentosAplicablesList {
+    final raw = departamentosAplicables.trim();
+    if (raw.isEmpty) return ['Todos'];
+    return raw
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  /// Verifica si este servicio aplica al [depto] de un producto físico.
+  bool appliesToDepartment(String depto) {
+    final cleanDepto = depto.trim().toLowerCase();
+    final list = departamentosAplicablesList;
+    if (list.isEmpty) return true;
+    for (final item in list) {
+      final low = item.toLowerCase();
+      if (low == 'todos' || low == cleanDepto) return true;
+    }
+    return false;
+  }
+
   factory Product.fromMap(Map<String, dynamic> map) {
     final rawDesc = map['descripcion'] as String? ?? '';
     final rawNombre = map['nombre'] as String?;
+    final rawDeptosApl = map['departamentos_aplicables'] as String?;
     return Product(
       id: map['id'] as String,
       codigoBarras: map['codigo_barras'] as String?,
@@ -75,7 +101,8 @@ class Product {
       precioCerrajero: (map['precio_cerrajero'] as num?)?.toDouble(),
       precioTaller: (map['precio_taller'] as num?)?.toDouble(),
       porcentajeImpuesto: (map['porcentaje_impuesto'] as num?)?.toDouble() ?? 0.0,
-      departamento: map['departamento'] as String? ?? 'General',
+      departamento: map['departamento'] as String? ?? 'Residencial',
+      departamentosAplicables: (rawDeptosApl != null && rawDeptosApl.trim().isNotEmpty) ? rawDeptosApl.trim() : 'Todos',
       stockActual: (map['stock_actual'] as num?)?.toDouble() ?? 0.0,
       stockMinimo: (map['stock_minimo'] as num?)?.toDouble() ?? 5.0,
       esAGranel: (map['es_a_granel'] as int? ?? 0) == 1,
@@ -103,6 +130,7 @@ class Product {
       'precio_taller': precioTaller,
       'porcentaje_impuesto': porcentajeImpuesto,
       'departamento': departamento,
+      'departamentos_aplicables': departamentosAplicables,
       'stock_actual': stockActual,
       'stock_minimo': stockMinimo,
       'es_a_granel': esAGranel ? 1 : 0,
@@ -129,6 +157,7 @@ class Product {
     double? precioTaller,
     double? porcentajeImpuesto,
     String? departamento,
+    String? departamentosAplicables,
     double? stockActual,
     double? stockMinimo,
     bool? esAGranel,
@@ -153,6 +182,7 @@ class Product {
       precioTaller: precioTaller ?? this.precioTaller,
       porcentajeImpuesto: porcentajeImpuesto ?? this.porcentajeImpuesto,
       departamento: departamento ?? this.departamento,
+      departamentosAplicables: departamentosAplicables ?? this.departamentosAplicables,
       stockActual: stockActual ?? this.stockActual,
       stockMinimo: stockMinimo ?? this.stockMinimo,
       esAGranel: esAGranel ?? this.esAGranel,
@@ -182,6 +212,11 @@ class SaleDetailItem {
   final bool esServicio;
   final String? insumoVinculadoId;
   final double cantidadInsumo;
+  // Vinculación Dinámica de Insumo en Punto de Cobro (Dynamic Runtime BOM)
+  final String? insumoUtilizadoId;
+  final String? insumoUtilizadoNombre;
+  final String? insumoUtilizadoSku;
+  final double cantidadInsumoConsumida;
   final String etiquetaPrecio; // 'Público', 'Cerrajero', 'Taller', 'Mayoreo', 'Manual'
   final double stockDisponible; // Para indicador visual en la tabla de cobro
 
@@ -201,9 +236,18 @@ class SaleDetailItem {
     this.esServicio = false,
     this.insumoVinculadoId,
     this.cantidadInsumo = 1.0,
+    this.insumoUtilizadoId,
+    this.insumoUtilizadoNombre,
+    this.insumoUtilizadoSku,
+    this.cantidadInsumoConsumida = 0.0,
     this.etiquetaPrecio = 'Público',
     this.stockDisponible = 0.0,
   }) : nombre = (nombre != null && nombre.isNotEmpty) ? nombre : descripcion;
+
+  bool get hasDynamicInsumo =>
+      insumoUtilizadoId != null &&
+      insumoUtilizadoId!.trim().isNotEmpty &&
+      cantidadInsumoConsumida > 0;
 
   Map<String, dynamic> toMap(String ventaId) {
     return {
@@ -215,6 +259,8 @@ class SaleDetailItem {
       'costo_historico': costoHistorico,
       'descuento_linea': descuentoLinea,
       'total_linea': totalLinea,
+      'insumo_utilizado_id': insumoUtilizadoId,
+      'cantidad_insumo_consumida': cantidadInsumoConsumida,
     };
   }
 
@@ -235,6 +281,10 @@ class SaleDetailItem {
       'es_servicio': esServicio ? 1 : 0,
       'insumo_vinculado_id': insumoVinculadoId,
       'cantidad_insumo': cantidadInsumo,
+      'insumo_utilizado_id': insumoUtilizadoId,
+      'insumo_utilizado_nombre': insumoUtilizadoNombre,
+      'insumo_utilizado_sku': insumoUtilizadoSku,
+      'cantidad_insumo_consumida': cantidadInsumoConsumida,
       'etiqueta_precio': etiquetaPrecio,
     };
   }
@@ -255,6 +305,10 @@ class SaleDetailItem {
     bool? esServicio,
     String? insumoVinculadoId,
     double? cantidadInsumo,
+    String? insumoUtilizadoId,
+    String? insumoUtilizadoNombre,
+    String? insumoUtilizadoSku,
+    double? cantidadInsumoConsumida,
     String? etiquetaPrecio,
     double? stockDisponible,
   }) {
@@ -274,6 +328,10 @@ class SaleDetailItem {
       esServicio: esServicio ?? this.esServicio,
       insumoVinculadoId: insumoVinculadoId ?? this.insumoVinculadoId,
       cantidadInsumo: cantidadInsumo ?? this.cantidadInsumo,
+      insumoUtilizadoId: insumoUtilizadoId ?? this.insumoUtilizadoId,
+      insumoUtilizadoNombre: insumoUtilizadoNombre ?? this.insumoUtilizadoNombre,
+      insumoUtilizadoSku: insumoUtilizadoSku ?? this.insumoUtilizadoSku,
+      cantidadInsumoConsumida: cantidadInsumoConsumida ?? this.cantidadInsumoConsumida,
       etiquetaPrecio: etiquetaPrecio ?? this.etiquetaPrecio,
       stockDisponible: stockDisponible ?? this.stockDisponible,
     );
@@ -317,6 +375,8 @@ class SaleTransactionRequest {
   final String ventaId;
   final String corteCajaId;
   final String? folioTicket;
+  final String clienteId;
+  final String clienteNombre;
   final double subtotal;
   final double descuentoTotal;
   final double impuestosTotal;
@@ -329,6 +389,8 @@ class SaleTransactionRequest {
     required this.ventaId,
     required this.corteCajaId,
     this.folioTicket,
+    this.clienteId = 'PUBLICO-GRAL',
+    this.clienteNombre = 'Público en General',
     required this.subtotal,
     this.descuentoTotal = 0.0,
     this.impuestosTotal = 0.0,
@@ -337,6 +399,37 @@ class SaleTransactionRequest {
     required this.items,
     DateTime? fechaVenta,
   }) : fechaVenta = fechaVenta ?? DateTime.now().toUtc();
+}
+
+enum ClientMovementType {
+  compraContado,
+  compraCredito,
+  abonoPago,
+  ticketCancelado,
+}
+
+class ClientMovementItem {
+  final String id;
+  final String? folio;
+  final DateTime fecha;
+  final ClientMovementType tipo;
+  final String concepto;
+  final double monto;
+  final String? formaPago;
+  final List<Map<String, dynamic>> partidas;
+  final String? corteCajaId;
+
+  ClientMovementItem({
+    required this.id,
+    this.folio,
+    required this.fecha,
+    required this.tipo,
+    required this.concepto,
+    required this.monto,
+    this.formaPago,
+    this.partidas = const [],
+    this.corteCajaId,
+  });
 }
 
 /// Cliente extendido para facturación y cuentas por cobrar

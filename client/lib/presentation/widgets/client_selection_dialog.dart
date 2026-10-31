@@ -45,6 +45,7 @@ class _ClientSelectionDialogState extends State<ClientSelectionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.people_outline, color: Color(0xFF1F4E79)),
@@ -52,9 +53,11 @@ class _ClientSelectionDialogState extends State<ClientSelectionDialog> {
           Text('Asignar Cliente', style: TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
-      content: SizedBox(
-        width: 400,
-        height: 450,
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 420,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+        ),
         child: Column(
           children: [
             TextField(

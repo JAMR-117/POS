@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'sync_models.dart';
 
@@ -58,7 +57,7 @@ class SyncApiClient {
           statusCode: response.statusCode,
         );
       }
-    } on SocketException catch (e) {
+    } on http.ClientException catch (e) {
       throw SyncApiException('Sin conexión física o host inalcanzable: ${e.message}');
     } on TimeoutException {
       throw SyncApiException('Tiempo de espera agotado al despachar lote (Timeout).');

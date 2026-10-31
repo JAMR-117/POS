@@ -131,7 +131,8 @@ class _CheckoutDialogState extends State<CheckoutDialog> {
       child: FocusScope(
         autofocus: true,
         child: AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4.0)),
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8.0)),
           contentPadding: const EdgeInsets.all(20.0),
           title: Container(
             padding: const EdgeInsets.only(bottom: 8.0),
@@ -152,8 +153,11 @@ class _CheckoutDialogState extends State<CheckoutDialog> {
               ],
             ),
           ),
-          content: SizedBox(
-            width: 480,
+          content: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 480,
+              maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+            ),
             child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,

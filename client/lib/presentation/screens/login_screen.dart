@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/string_utils.dart';
 import '../controllers/auth_controller.dart';
 // O la ruta a tu POS
 
@@ -35,7 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void _onDelete() {
     if (_pin.isNotEmpty) {
       setState(() {
-        _pin = _pin.substring(0, _pin.length - 1);
+        _pin = _pin.safeSub(0, _pin.length - 1);
       });
     }
   }

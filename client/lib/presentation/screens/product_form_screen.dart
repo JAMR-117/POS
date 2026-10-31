@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import '../../core/department_theme.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/product_repository.dart';
 
@@ -19,7 +20,7 @@ class ProductFormScreen extends StatefulWidget {
 
 class _ProductFormScreenState extends State<ProductFormScreen> {
   final _formKey = GlobalKey<FormState>();
-  
+
   late TextEditingController _codigoController;
   late TextEditingController _skuController;
   late TextEditingController _nombreController;
@@ -37,13 +38,13 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
   late TextEditingController _impuestosController;
   late TextEditingController _departamentoController;
   late TextEditingController _stockActualController;
-  late TextEditingController _cantidadInsumoController;
-  
+
   bool _esAGranel = false;
   bool _esServicio = false;
-  String? _insumoVinculadoId;
-  List<Product> _insumosDisponibles = [];
-  List<String> _departamentosDisponibles = [];
+  bool _aplicaATodos = true;
+  final Set<String> _departamentosSeleccionados = {};
+
+  List<String> _departamentosDisponibles = [...kAllStandardDepartments];
   bool _isLoading = false;
 
   final List<String> _marcasComunes = [
@@ -54,6 +55,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     'Silca',
     'Phillips',
     'Xhorse',
+    'KEYDIY',
     'Genérica',
     'Taller',
     'Yale',
@@ -78,25 +80,32 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _cantidadMayoreoController = TextEditingController(text: p?.cantidadMayoreo?.toString() ?? '');
     _precioMayoreoController = TextEditingController(text: p?.precioMayoreo?.toString() ?? '');
     _stockMinimoController = TextEditingController(text: p?.stockMinimo.toString() ?? '5.0');
-    _impuestosController = TextEditingController(text: p?.porcentajeImpuesto.toString() ?? '0.16');
-    _departamentoController = TextEditingController(text: p?.departamento ?? 'Llaves Tradicionales');
+    _impuestosController = TextEditingController(text: p?.porcentajeImpuesto.toString() ?? '0.0');
+    _departamentoController = TextEditingController(text: p?.departamento ?? 'Residencial');
     _stockActualController = TextEditingController(text: p?.stockActual.toString() ?? '0.0');
-    _cantidadInsumoController = TextEditingController(text: p?.cantidadInsumo.toString() ?? '1.0');
 
     _esAGranel = p?.esAGranel ?? false;
     _esServicio = p?.esServicio ?? false;
-    _insumoVinculadoId = p?.insumoVinculadoId;
+
+    if (p != null && p.esServicio) {
+      final list = p.departamentosAplicablesList;
+      if (list.isEmpty || list.any((d) => d.toLowerCase() == 'todos')) {
+        _aplicaATodos = true;
+        _departamentosSeleccionados.clear();
+      } else {
+        _aplicaATodos = false;
+        _departamentosSeleccionados.addAll(list);
+      }
+    }
 
     _loadData();
   }
 
   Future<void> _loadData() async {
     try {
-      final physicals = await widget.repository.getPhysicalProducts();
       final deptos = await widget.repository.getDepartmentNames();
-      if (mounted) {
+      if (mounted && deptos.isNotEmpty) {
         setState(() {
-          _insumosDisponibles = physicals;
           _departamentosDisponibles = deptos;
         });
       }
@@ -122,135 +131,87 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     _impuestosController.dispose();
     _departamentoController.dispose();
     _stockActualController.dispose();
-    _cantidadInsumoController.dispose();
     super.dispose();
   }
 
-  Future<void> _pickLinkedInsumo() async {
-    final selected = await showDialog<Product>(
-      context: context,
-      builder: (ctx) {
-        String filter = '';
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            final filtered = _insumosDisponibles.where((p) {
-              if (filter.isEmpty) return true;
-              final f = filter.toLowerCase();
-              return p.nombre.toLowerCase().contains(f) ||
-                  (p.sku ?? '').toLowerCase().contains(f) ||
-                  (p.codigoEquivalencia ?? '').toLowerCase().contains(f) ||
-                  (p.marca ?? '').toLowerCase().contains(f);
-            }).toList();
-
-            return AlertDialog(
-              title: const Text('Vincular Insumo Físico (BOM Ligero)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-              content: SizedBox(
-                width: 480,
-                height: 420,
-                child: Column(
-                  children: [
-                    TextField(
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Buscar por clave, molde o marca (ej. R-52, PHI-52, TP08)',
-                        prefixIcon: Icon(Icons.search),
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onChanged: (v) => setModalState(() => filter = v),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: filtered.isEmpty
-                          ? const Center(child: Text('No hay insumos coincidentes.'))
-                          : ListView.separated(
-                              itemCount: filtered.length,
-                              separatorBuilder: (_, __) => const Divider(height: 1),
-                              itemBuilder: (context, idx) {
-                                final item = filtered[idx];
-                                return ListTile(
-                                  dense: true,
-                                  leading: const Icon(Icons.vpn_key, color: Color(0xFF1F4E79)),
-                                  title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                  subtitle: Text('SKU: ${item.sku ?? "-"} | Marca: ${item.marca ?? "-"} | Molde: ${item.codigoEquivalencia ?? "-"}'),
-                                  trailing: Text(
-                                    'Stock: ${item.stockActual}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                      color: item.stockActual <= 5 ? Colors.red : Colors.green.shade800,
-                                    ),
-                                  ),
-                                  onTap: () => Navigator.pop(ctx, item),
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancelar'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
-
-    if (selected != null) {
-      setState(() {
-        _insumoVinculadoId = selected.id;
-      });
+  String _computeDepartamentosAplicables() {
+    if (!_esServicio) return 'Todos';
+    if (_aplicaATodos || _departamentosSeleccionados.isEmpty) {
+      return 'Todos';
     }
+    return _departamentosSeleccionados.join(',');
   }
 
   Future<void> _handleSave() async {
     if (!_formKey.currentState!.validate()) return;
-    
+
+    if (_esServicio && !_aplicaATodos && _departamentosSeleccionados.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Selecciona al menos un departamento aplicable o marca "Todos".'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
     final messenger = ScaffoldMessenger.of(context);
     final nav = Navigator.of(context);
-    
+
     try {
-      final String id = widget.productToEdit?.id ?? _generateLocalUUID();
-      final String nombre = _nombreController.text.trim();
-      final String descripcion = _descripcionController.text.trim();
       final String? codigo = _codigoController.text.trim().isEmpty ? null : _codigoController.text.trim();
       final String? sku = _skuController.text.trim().isEmpty ? codigo : _skuController.text.trim();
+      final String id = widget.productToEdit?.id ?? (sku ?? codigo ?? _generateLocalUUID());
+      final String nombre = _nombreController.text.trim();
+      final String descripcion = _descripcionController.text.trim().isEmpty
+          ? nombre
+          : _descripcionController.text.trim();
+
+      final String deptoFinal = _esServicio
+          ? 'Servicios'
+          : (_departamentoController.text.trim().isEmpty ? 'Residencial' : _departamentoController.text.trim());
 
       final product = Product(
         id: id,
-        codigoBarras: codigo,
-        sku: sku,
+        codigoBarras: codigo ?? id,
+        sku: sku ?? id,
         nombre: nombre,
         descripcion: descripcion,
-        marca: _marcaController.text.trim().isEmpty ? 'Genérica' : _marcaController.text.trim(),
-        codigoEquivalencia: _equivalenciaController.text.trim().isEmpty ? null : _equivalenciaController.text.trim().toUpperCase(),
-        ubicacion: _ubicacionController.text.trim().isEmpty ? null : _ubicacionController.text.trim(),
-        precioCompra: double.tryParse(_precioCompraController.text) ?? 0.0,
+        marca: _esServicio
+            ? (_marcaController.text.trim().isEmpty ? 'Taller' : _marcaController.text.trim())
+            : (_marcaController.text.trim().isEmpty ? 'Genérica' : _marcaController.text.trim()),
+        codigoEquivalencia: _esServicio || _equivalenciaController.text.trim().isEmpty
+            ? null
+            : _equivalenciaController.text.trim().toUpperCase(),
+        ubicacion: _esServicio || _ubicacionController.text.trim().isEmpty
+            ? null
+            : _ubicacionController.text.trim(),
+        precioCompra: _esServicio ? 0.0 : (double.tryParse(_precioCompraController.text) ?? 0.0),
         precioVenta: double.parse(_precioVentaController.text),
         precioCerrajero: double.tryParse(_precioCerrajeroController.text),
         precioTaller: double.tryParse(_precioTallerController.text),
-        stockMinimo: double.tryParse(_stockMinimoController.text) ?? 5.0,
+        stockMinimo: _esServicio ? 0.0 : (double.tryParse(_stockMinimoController.text) ?? 5.0),
         porcentajeImpuesto: double.tryParse(_impuestosController.text) ?? 0.0,
-        departamento: _departamentoController.text.trim().isEmpty ? 'General' : _departamentoController.text.trim(),
+        departamento: deptoFinal,
+        departamentosAplicables: _computeDepartamentosAplicables(),
         stockActual: _esServicio ? 999.0 : (double.tryParse(_stockActualController.text) ?? 0.0),
-        esAGranel: _esAGranel,
+        esAGranel: _esServicio ? false : _esAGranel,
         cantidadMayoreo: double.tryParse(_cantidadMayoreoController.text),
         precioMayoreo: double.tryParse(_precioMayoreoController.text),
         esServicio: _esServicio,
-        insumoVinculadoId: _esServicio ? _insumoVinculadoId : null,
-        cantidadInsumo: _esServicio ? (double.tryParse(_cantidadInsumoController.text) ?? 1.0) : 1.0,
+        insumoVinculadoId: null, // Dynamic Runtime BOM en caja reemplaza vínculo fijo
+        cantidadInsumo: 1.0,
       );
 
       await widget.repository.saveProduct(product, isUpdate: widget.productToEdit != null);
-      
+
       if (mounted) {
         messenger.showSnackBar(
-          const SnackBar(content: Text('Producto guardado exitosamente.'), backgroundColor: Colors.green),
+          SnackBar(
+            content: Text(_esServicio ? 'Servicio maestro guardado exitosamente.' : 'Producto guardado exitosamente.'),
+            backgroundColor: Colors.green,
+          ),
         );
         nav.pop(true);
       }
@@ -269,13 +230,14 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
     return List.generate(16, (i) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
   }
 
-  Product? get _linkedInsumoProduct {
-    if (_insumoVinculadoId == null) return null;
-    try {
-      return _insumosDisponibles.firstWhere((p) => p.id == _insumoVinculadoId);
-    } catch (_) {
-      return null;
+  List<String> get _selectableServiceDepartments {
+    final base = <String>[...kPhysicalDepartments];
+    for (final d in _departamentosDisponibles) {
+      if (d != 'Servicios' && d != 'Todos' && !base.contains(d)) {
+        base.add(d);
+      }
     }
+    return base;
   }
 
   @override
@@ -302,108 +264,132 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
               child: ListView(
                 padding: const EdgeInsets.all(16.0),
                 children: [
-                  // Tipo: Servicio vs Físico
+                  // 1. Switch Principal: ¿Es un Servicio? vs Producto Físico
                   Card(
-                    color: _esServicio ? const Color(0xFFF3E5F5) : const Color(0xFFE8F5E9),
+                    color: _esServicio ? const Color(0xFFE0F7FA) : const Color(0xFFE8F5E9),
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(6),
-                      side: BorderSide(color: _esServicio ? Colors.purple.shade300 : Colors.green.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(color: _esServicio ? Colors.cyan.shade400 : Colors.green.shade300),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.all(12.0),
+                      padding: const EdgeInsets.all(14.0),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           SwitchListTile(
                             contentPadding: EdgeInsets.zero,
                             title: Text(
-                              _esServicio ? '⚙️ Es un Servicio (Duplicado, Programación, Corte)' : '📦 Es un Producto Físico (Llave, Cerradura, Transponder)',
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              _esServicio
+                                  ? '🛠️ ¿Es un Servicio? (Activado: Servicio Configurable por Departamento)'
+                                  : '📦 ¿Es un Servicio? (Desactivado: Producto Físico con Inventario)',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
                             ),
-                            subtitle: Text(_esServicio 
-                              ? 'Permite descontar un insumo físico automáticamente de stock por cada servicio realizado.' 
-                              : 'Controla existencia física e inventario directo.'),
+                            subtitle: Text(
+                              _esServicio
+                                  ? 'El insumo físico (llave, chip o carcasa) se vinculará y descontará dinámicamente al momento de cobrar en caja.'
+                                  : 'Controla existencias en gaveta, molde equivalente y alertas de reorden.',
+                            ),
                             value: _esServicio,
-                            activeThumbColor: Colors.purple,
+                            activeThumbColor: Colors.cyan.shade800,
                             onChanged: (val) {
                               setState(() {
                                 _esServicio = val;
-                                if (_esServicio && _departamentoController.text == 'Llaves Tradicionales') {
+                                if (_esServicio) {
                                   _departamentoController.text = 'Servicios';
+                                  if (_marcaController.text == 'Genérica') {
+                                    _marcaController.text = 'Taller';
+                                  }
+                                } else if (_departamentoController.text == 'Servicios') {
+                                  _departamentoController.text = 'Residencial';
                                 }
                               });
                             },
                           ),
+
+                          // Selector Múltiple de Departamentos Aplicables (Solo Servicios)
                           if (_esServicio) ...[
-                            const Divider(),
-                            const Text(
-                              'Insumo Físico Vinculado (BOM Ligero):',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.purple),
+                            const Divider(height: 20),
+                            Row(
+                              children: [
+                                Icon(Icons.account_tree_outlined, size: 18, color: Colors.cyan.shade900),
+                                const SizedBox(width: 8),
+                                Text(
+                                  '¿Para qué departamentos aplica este servicio?',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    color: Colors.cyan.shade900,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 8),
-                            if (_insumoVinculadoId != null && _linkedInsumoProduct != null)
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: Colors.purple.shade200),
-                                ),
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.vpn_key, color: Colors.purple),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _linkedInsumoProduct!.nombre,
-                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                                          ),
-                                          Text(
-                                            'SKU: ${_linkedInsumoProduct!.sku ?? "-"} | Stock: ${_linkedInsumoProduct!.stockActual}',
-                                            style: const TextStyle(fontSize: 11, color: Colors.black54),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    TextButton.icon(
-                                      onPressed: _pickLinkedInsumo,
-                                      icon: const Icon(Icons.swap_horiz, size: 16),
-                                      label: const Text('Cambiar'),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.close, color: Colors.red, size: 18),
-                                      tooltip: 'Quitar insumo',
-                                      onPressed: () => setState(() => _insumoVinculadoId = null),
-                                    ),
-                                  ],
-                                ),
-                              )
-                            else
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.purple.shade800,
-                                  side: BorderSide(color: Colors.purple.shade400),
-                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                                ),
-                                onPressed: _pickLinkedInsumo,
-                                icon: const Icon(Icons.search),
-                                label: const Text('Buscar y vincular insumo (Llave virgen, Chip, Carcasa)...'),
-                              ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Al elegir en caja un producto físico de estos departamentos, el sistema ofrecerá aplicar este servicio.',
+                              style: TextStyle(fontSize: 12, color: Colors.black54),
+                            ),
                             const SizedBox(height: 10),
-                            TextFormField(
-                              controller: _cantidadInsumoController,
-                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                              decoration: const InputDecoration(
-                                labelText: 'Cantidad de insumo consumido por cada servicio',
-                                isDense: true,
-                                border: OutlineInputBorder(),
-                                filled: true,
-                                fillColor: Colors.white,
-                                suffixText: 'unidades',
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.cyan.shade200),
+                              ),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  FilterChip(
+                                    label: const Text('Todos los Departamentos'),
+                                    selected: _aplicaATodos,
+                                    selectedColor: Colors.cyan.shade100,
+                                    checkmarkColor: Colors.cyan.shade900,
+                                    labelStyle: TextStyle(
+                                      fontWeight: _aplicaATodos ? FontWeight.bold : FontWeight.normal,
+                                      color: _aplicaATodos ? Colors.cyan.shade900 : Colors.black87,
+                                    ),
+                                    onSelected: (selected) {
+                                      setState(() {
+                                        _aplicaATodos = selected;
+                                        if (selected) {
+                                          _departamentosSeleccionados.clear();
+                                        }
+                                      });
+                                    },
+                                  ),
+                                  ..._selectableServiceDepartments.map((dep) {
+                                    final isSelected = !_aplicaATodos && _departamentosSeleccionados.contains(dep);
+                                    final style = DepartmentStyle.of(dep);
+                                    return FilterChip(
+                                      avatar: Icon(style.icon, size: 15, color: style.fg),
+                                      label: Text(dep),
+                                      selected: isSelected,
+                                      selectedColor: style.bg,
+                                      checkmarkColor: style.fg,
+                                      side: BorderSide(color: isSelected ? style.fg : Colors.grey.shade300),
+                                      labelStyle: TextStyle(
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        color: isSelected ? style.fg : Colors.black87,
+                                      ),
+                                      onSelected: (selected) {
+                                        setState(() {
+                                          if (selected) {
+                                            _aplicaATodos = false;
+                                            _departamentosSeleccionados.add(dep);
+                                          } else {
+                                            _departamentosSeleccionados.remove(dep);
+                                            if (_departamentosSeleccionados.isEmpty) {
+                                              _aplicaATodos = true;
+                                            }
+                                          }
+                                        });
+                                      },
+                                    );
+                                  }),
+                                ],
                               ),
                             ),
                           ],
@@ -413,14 +399,16 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Datos Principales
+                  // 2. Datos Principales
                   TextFormField(
                     controller: _nombreController,
-                    decoration: const InputDecoration(
-                      labelText: 'Nombre Comercial / Corto *',
-                      hintText: 'Ej. Llave Virgen R-52, Duplicado Llave Tradicional, Chip TP08...',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.title),
+                    decoration: InputDecoration(
+                      labelText: _esServicio ? 'Nombre del Servicio *' : 'Nombre Comercial / Corto *',
+                      hintText: _esServicio
+                          ? 'Ej. Duplicado de Llave Residencial, Programación de Transponder...'
+                          : 'Ej. Llave Virgen R-52, Chip TP08, Control Keydiy...',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.title),
                     ),
                     validator: (v) => v == null || v.trim().isEmpty ? 'El nombre es obligatorio' : null,
                   ),
@@ -429,13 +417,20 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   TextFormField(
                     controller: _descripcionController,
                     maxLines: 2,
-                    decoration: const InputDecoration(
-                      labelText: 'Descripción Técnica / Compatibilidad *',
-                      hintText: 'Ej. Compatible cerraduras Phillips 715, 5 pernos o Chip Megamos Crypto VW Jetta A4...',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.description_outlined),
+                    decoration: InputDecoration(
+                      labelText: _esServicio ? 'Descripción del Servicio' : 'Descripción Técnica / Compatibilidad *',
+                      hintText: _esServicio
+                          ? 'Ej. Incluye corte de llave y ajuste básico en mostrador'
+                          : 'Ej. Compatible cerraduras Phillips 715, 5 pernos o Chip Megamos Crypto VW Jetta A4...',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.description_outlined),
                     ),
-                    validator: (v) => v == null || v.trim().isEmpty ? 'La descripción técnica es obligatoria' : null,
+                    validator: (v) {
+                      if (!_esServicio && (v == null || v.trim().isEmpty)) {
+                        return 'La descripción técnica es obligatoria';
+                      }
+                      return null;
+                    },
                   ),
                   const SizedBox(height: 14),
 
@@ -444,10 +439,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       Expanded(
                         child: TextFormField(
                           controller: _codigoController,
-                          decoration: const InputDecoration(
-                            labelText: 'Código de Barras',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.qr_code),
+                          decoration: InputDecoration(
+                            labelText: _esServicio ? 'Código Interno del Servicio' : 'Código de Barras',
+                            hintText: _esServicio ? 'Ej. SRV-DUP-RES' : null,
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.qr_code),
                           ),
                         ),
                       ),
@@ -455,11 +451,11 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       Expanded(
                         child: TextFormField(
                           controller: _skuController,
-                          decoration: const InputDecoration(
-                            labelText: 'Clave / SKU de Llave',
-                            hintText: 'Ej. R-52, PHI-52, TP08, DX-1',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.vpn_key_outlined),
+                          decoration: InputDecoration(
+                            labelText: _esServicio ? 'Clave Corta (SKU)' : 'Clave / SKU de Llave',
+                            hintText: _esServicio ? 'Ej. SRV-DUP-RES' : 'Ej. R-52, PHI-52, TP08, DX-1',
+                            border: const OutlineInputBorder(),
+                            prefixIcon: const Icon(Icons.vpn_key_outlined),
                           ),
                         ),
                       ),
@@ -467,104 +463,114 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Marca y Equivalencia (Cross-Reference)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Autocomplete<String>(
-                          initialValue: TextEditingValue(text: _marcaController.text),
-                          optionsBuilder: (textEditingValue) {
-                            if (textEditingValue.text.isEmpty) return _marcasComunes;
-                            return _marcasComunes.where((m) => m.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-                          },
-                          onSelected: (val) => _marcaController.text = val,
-                          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                            return TextFormField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: const InputDecoration(
-                                labelText: 'Marca / Fabricante',
-                                hintText: 'Alba, JMA, Dexter, Ilco, Xhorse...',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.business_outlined),
-                              ),
-                              onChanged: (v) => _marcaController.text = v,
-                            );
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _equivalenciaController,
-                          textCapitalization: TextCapitalization.characters,
-                          decoration: const InputDecoration(
-                            labelText: 'Molde Universal (Equivalencia)',
-                            hintText: 'Ej. EQ-PHI52, EQ-DX1',
-                            helperText: 'Vincula llaves idénticas entre diferentes marcas',
-                            border: OutlineInputBorder(),
-                            prefixIcon: Icon(Icons.sync_alt),
+                  // Marca, Molde y Ubicación solo para Productos Físicos
+                  if (!_esServicio) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Autocomplete<String>(
+                            initialValue: TextEditingValue(text: _marcaController.text),
+                            optionsBuilder: (textEditingValue) {
+                              if (textEditingValue.text.isEmpty) return _marcasComunes;
+                              return _marcasComunes.where((m) => m.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+                            },
+                            onSelected: (val) => _marcaController.text = val,
+                            fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                              return TextFormField(
+                                controller: controller,
+                                focusNode: focusNode,
+                                decoration: const InputDecoration(
+                                  labelText: 'Marca / Fabricante',
+                                  hintText: 'Alba, JMA, Dexter, Ilco, Xhorse...',
+                                  border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.business_outlined),
+                                ),
+                                onChanged: (v) => _marcaController.text = v,
+                              );
+                            },
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Ubicación Física (Exclusiva de pantalla)
-                  TextFormField(
-                    controller: _ubicacionController,
-                    decoration: const InputDecoration(
-                      labelText: '📍 Ubicación Física Interna (Solo Operador en Pantalla)',
-                      hintText: 'Ej. Tablero 1 - Gancho 14, Gaveta Chips #1, Estante C...',
-                      helperText: 'Esta información NUNCA se imprimirá en el ticket del cliente ni en cotizaciones.',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.pin_drop_outlined, color: Color(0xFFD84315)),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _equivalenciaController,
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: const InputDecoration(
+                              labelText: 'Molde Universal (Equivalencia)',
+                              hintText: 'Ej. R52, R52L, PHI-14D, A89',
+                              helperText: 'Vincula llaves equivalentes entre distintas marcas',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.sync_alt),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 14),
 
-                  // SISTEMA MULTI-PRECIO (LISTAS POR NIVEL)
+                    TextFormField(
+                      controller: _ubicacionController,
+                      decoration: const InputDecoration(
+                        labelText: '📍 Ubicación Física Interna (Solo Operador en Pantalla)',
+                        hintText: 'Ej. RE-14, AU-08, SE-12, MO-04, Vitrina Chips...',
+                        helperText: 'Esta información NUNCA se imprimirá en el ticket del cliente ni en cotizaciones.',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.pin_drop_outlined, color: Color(0xFFD84315)),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // 3. SISTEMA MULTI-PRECIO (PRECIOS SUGERIDOS DEL SERVICIO O PRODUCTO)
                   Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF8F9FA),
-                      borderRadius: BorderRadius.circular(6),
+                      borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: Colors.grey.shade300),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Row(
+                        Row(
                           children: [
-                            Icon(Icons.price_change, color: Color(0xFF1F4E79), size: 20),
-                            SizedBox(width: 8),
-                            Text('Esquema de Precios por Nivel (Multi-Tier Pricing)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1F4E79))),
+                            const Icon(Icons.price_change, color: Color(0xFF1F4E79), size: 20),
+                            const SizedBox(width: 8),
+                            Text(
+                              _esServicio
+                                  ? 'Precios Sugeridos del Servicio por Categoría (Editables en Caja)'
+                                  : 'Esquema de Precios por Nivel (Multi-Tier Pricing)',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF1F4E79)),
+                            ),
                           ],
                         ),
                         const SizedBox(height: 12),
                         Row(
                           children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: _precioCompraController,
-                                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: const InputDecoration(
-                                  labelText: 'Costo Unitario Compra (\$)',
-                                  border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.attach_money),
+                            if (!_esServicio) ...[
+                              Expanded(
+                                child: TextFormField(
+                                  controller: _precioCompraController,
+                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Costo Unitario Compra (\$)',
+                                    border: OutlineInputBorder(),
+                                    prefixIcon: Icon(Icons.attach_money),
+                                  ),
                                 ),
                               ),
-                            ),
-                            const SizedBox(width: 12),
+                              const SizedBox(width: 12),
+                            ],
                             Expanded(
                               child: TextFormField(
                                 controller: _precioVentaController,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                decoration: const InputDecoration(
-                                  labelText: 'Precio 1: Público Casual * (\$)',
-                                  border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.monetization_on, color: Color(0xFF2E7D32)),
+                                decoration: InputDecoration(
+                                  labelText: _esServicio
+                                      ? 'Precio Público Sugerido (Precio 1) * (\$)'
+                                      : 'Precio 1: Público Casual * (\$)',
+                                  border: const OutlineInputBorder(),
+                                  prefixIcon: const Icon(Icons.monetization_on, color: Color(0xFF2E7D32)),
                                 ),
                                 validator: (v) {
                                   if (v == null || v.isEmpty) return 'Requerido';
@@ -583,7 +589,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                                 controller: _precioCerrajeroController,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: const InputDecoration(
-                                  labelText: 'Precio 2: Colega Cerrajero (\$)',
+                                  labelText: 'Precio Cerrajero / Gremio (Precio 2) (\$)',
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.vpn_key, color: Color(0xFF0D47A1)),
                                 ),
@@ -595,7 +601,7 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                                 controller: _precioTallerController,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: const InputDecoration(
-                                  labelText: 'Precio 3: Taller Automotriz (\$)',
+                                  labelText: 'Precio Taller Automotriz (Precio 3) (\$)',
                                   border: OutlineInputBorder(),
                                   prefixIcon: Icon(Icons.build, color: Color(0xFF4A148C)),
                                 ),
@@ -608,25 +614,25 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                           children: [
                             Expanded(
                               child: TextFormField(
-                                controller: _cantidadMayoreoController,
+                                controller: _precioMayoreoController,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: const InputDecoration(
-                                  labelText: 'Cant. Mínima Mayoreo',
-                                  hintText: 'Ej. 10 piezas',
+                                  labelText: 'Precio Mayoreo (Precio 4) (\$)',
+                                  hintText: 'Ej. 15.00',
                                   border: OutlineInputBorder(),
+                                  prefixIcon: Icon(Icons.layers, color: Color(0xFFE65100)),
                                 ),
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: TextFormField(
-                                controller: _precioMayoreoController,
+                                controller: _cantidadMayoreoController,
                                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                                 decoration: const InputDecoration(
-                                  labelText: 'Precio 4: Mayoreo por Volumen (\$)',
-                                  hintText: 'Ej. 10.00',
+                                  labelText: 'Cant. Mínima Mayoreo (Opcional)',
+                                  hintText: 'Ej. 5 piezas / servicios',
                                   border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.layers, color: Color(0xFFE65100)),
                                 ),
                               ),
                             ),
@@ -637,34 +643,31 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Departamento, Stock Actual y Stock Mínimo
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Autocomplete<String>(
-                          initialValue: TextEditingValue(text: _departamentoController.text),
-                          optionsBuilder: (textEditingValue) {
-                            if (textEditingValue.text.isEmpty) return _departamentosDisponibles;
-                            return _departamentosDisponibles.where((d) => d.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-                          },
-                          onSelected: (val) => _departamentoController.text = val,
-                          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-                            return TextFormField(
-                              controller: controller,
-                              focusNode: focusNode,
-                              decoration: const InputDecoration(
-                                labelText: 'Departamento / Familia',
-                                hintText: 'Llaves Tradicionales, Electrónica...',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.category_outlined),
-                              ),
-                              onChanged: (v) => _departamentoController.text = v,
-                            );
-                          },
+                  // 4. Departamento, Stock Actual y Stock Mínimo (Solo Productos Físicos)
+                  if (!_esServicio) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: kPhysicalDepartments.contains(_departamentoController.text)
+                                ? _departamentoController.text
+                                : 'Residencial',
+                            decoration: const InputDecoration(
+                              labelText: 'Departamento Estandarizado *',
+                              border: OutlineInputBorder(),
+                              prefixIcon: Icon(Icons.category_outlined),
+                            ),
+                            items: _selectableServiceDepartments
+                                .map((dep) => DropdownMenuItem(value: dep, child: Text(dep)))
+                                .toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                setState(() => _departamentoController.text = val);
+                              }
+                            },
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      if (!_esServicio) ...[
+                        const SizedBox(width: 12),
                         Expanded(
                           child: TextFormField(
                             controller: _stockActualController,
@@ -687,11 +690,8 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                           ),
                         ),
                       ],
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-
-                  if (!_esServicio)
+                    ),
+                    const SizedBox(height: 14),
                     SwitchListTile(
                       title: const Text('¿Se vende a granel / fraccionado?'),
                       subtitle: const Text('Habilita cobro de cantidades con decimales'),
@@ -699,18 +699,20 @@ class _ProductFormScreenState extends State<ProductFormScreen> {
                       activeThumbColor: const Color(0xFF1F4E79),
                       onChanged: (val) => setState(() => _esAGranel = val),
                     ),
+                  ],
 
                   const SizedBox(height: 24),
 
-                  ElevatedButton(
+                  ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
+                    icon: const Icon(Icons.save_outlined),
                     onPressed: _handleSave,
-                    child: const Text('GUARDAR PRODUCTO / SERVICIO'),
+                    label: Text(_esServicio ? 'GUARDAR SERVICIO CONFIGURABLE' : 'GUARDAR PRODUCTO FÍSICO'),
                   ),
                 ],
               ),

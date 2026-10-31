@@ -9,8 +9,10 @@ ETL de Migración Histórica desde Firebird (PDVDATA.FDB)
 
 import os
 import re
+import json
 import shutil
 from datetime import datetime, timedelta
+from collections import defaultdict
 import pandas as pd
 import firebirdsql
 
@@ -19,6 +21,10 @@ CATALOG_PATH = r"C:\POS\migracion\catalogo_migrado_pos.csv"
 ASSETS_CATALOG_PATH = r"C:\POS\client\assets\catalogo_migrado_pos.csv"
 CLIENTES_CSV_PATH = r"C:\POS\migracion\clientes_migrados_pos.csv"
 ASSETS_CLIENTES_PATH = r"C:\POS\client\assets\clientes_migrados_pos.csv"
+VENTAS_JSON_PATH = r"C:\POS\migracion\ventas_historicas_clientes.json"
+ASSETS_VENTAS_PATH = r"C:\POS\client\assets\ventas_historicas_clientes.json"
+ABONOS_JSON_PATH = r"C:\POS\migracion\abonos_historicos_clientes.json"
+ASSETS_ABONOS_PATH = r"C:\POS\client\assets\abonos_historicos_clientes.json"
 
 def normalize_key(val):
     if not val or pd.isna(val):
@@ -218,6 +224,129 @@ def main():
 
     shutil.copy2(CLIENTES_CSV_PATH, ASSETS_CLIENTES_PATH)
     print(f"[+] Sincronizado a assets: {ASSETS_CLIENTES_PATH}")
+
+    # 6. Extracción de VENTAS HISTÓRICAS DE CLIENTES
+    print("[*] Extrayendo tickets históricos atribuidos a clientes...")
+    cur.execute("""
+        SELECT 
+            t.ID,
+            t.FOLIO,
+            t.CAJA_ID,
+            t.CLIENTE_ID,
+            c.NOMBRE,
+            t.SUBTOTAL,
+            t.TOTAL,
+            t.ESTA_CANCELADO,
+            t.FORMA_PAGO,
+            t.PAGADO_EN,
+            t.CREADO_EN
+        FROM VENTATICKETS t
+        JOIN CLIENTES c ON t.CLIENTE_ID = c.NUMERO
+        ORDER BY t.PAGADO_EN DESC
+    """)
+    ticket_rows = cur.fetchall()
+
+    # Obtener artículos por ticket
+    cur.execute("""
+        SELECT 
+            a.ID,
+            a.TICKET_ID,
+            a.PRODUCTO_CODIGO,
+            a.PRODUCTO_NOMBRE,
+            a.CANTIDAD,
+            a.PRECIO_USADO,
+            a.PORCENTAJE_DESCUENTO
+        FROM VENTATICKETS_ARTICULOS a
+        JOIN VENTATICKETS t ON a.TICKET_ID = t.ID
+        WHERE t.CLIENTE_ID IS NOT NULL
+        ORDER BY a.ID
+    """)
+    art_by_ticket = defaultdict(list)
+    for r in cur.fetchall():
+        art_id, tkt_id, prod_cod, prod_nom, cant, p_usado, desc = r
+        clean_cod = str(prod_cod).strip().upper() if prod_cod else ""
+        clean_nom = fix_encoding(str(prod_nom).strip()) if prod_nom else clean_cod
+        p_flt = round(float(p_usado or 0.0), 2)
+        cant_flt = round(float(cant or 1.0), 3)
+        tot_flt = round(p_flt * cant_flt, 2)
+        art_by_ticket[tkt_id].append({
+            'id': f"DET-FDB-{art_id}",
+            'producto_id': clean_cod,
+            'nombre': clean_nom,
+            'cantidad': cant_flt,
+            'precio_historico': p_flt,
+            'costo_historico': 0.0,
+            'descuento_linea': 0.0,
+            'total_linea': tot_flt,
+        })
+
+    ventas_historicas = []
+    for tr in ticket_rows:
+        t_id, folio, caja_id, cli_num, cli_nom, subtotal, total, cancelado, forma_pago, pagado_en, creado_en = tr
+        fecha_dt = pagado_en or creado_en or datetime.now()
+        fecha_iso = fecha_dt.strftime('%Y-%m-%d %H:%M:%S')
+        estatus = 'cancelado' if cancelado == 't' else 'completado'
+        sub_flt = round(float(subtotal or total or 0.0), 2)
+        tot_flt = round(float(total or 0.0), 2)
+        cli_id = f"CLI-{cli_num:04d}"
+        clean_cli_nom = fix_encoding(str(cli_nom).strip()) if cli_nom else f"Cliente {cli_num}"
+
+        forma_label = 'Crédito' if forma_pago == 'c' else ('Efectivo' if forma_pago == 'e' else ('Tarjeta' if forma_pago == 't' else 'Crédito'))
+        pagos = [{'metodo': forma_label, 'monto': tot_flt}]
+
+        items = art_by_ticket.get(t_id, [])
+
+        ventas_historicas.append({
+            'id': f"FDB-TKT-{t_id}",
+            'corte_caja_id': f"CORTE-FDB-CAJA-{caja_id}",
+            'folio_ticket': f"FOLIO-{folio}",
+            'cliente_id': cli_id,
+            'cliente_nombre': clean_cli_nom,
+            'subtotal': sub_flt,
+            'descuento_total': 0.0,
+            'impuestos_total': 0.0,
+            'total': tot_flt,
+            'pagos_desglose': json.dumps(pagos),
+            'fecha_venta': fecha_iso,
+            'estatus': estatus,
+            'items': items,
+        })
+
+    with open(VENTAS_JSON_PATH, 'w', encoding='utf-8') as f:
+        json.dump(ventas_historicas, f, indent=2, ensure_ascii=False)
+    shutil.copy2(VENTAS_JSON_PATH, ASSETS_VENTAS_PATH)
+    print(f"[+] {len(ventas_historicas)} tickets de clientes guardados en {VENTAS_JSON_PATH} y {ASSETS_VENTAS_PATH}")
+
+    # 7. Extracción de ABONOS HISTÓRICOS
+    print("[*] Extrayendo abonos históricos de clientes...")
+    cur.execute("""
+        SELECT 
+            a.ID,
+            a.CLIENTE_ID,
+            c.NOMBRE,
+            a.DTFECHA,
+            a.DMONTO
+        FROM ABONOS a
+        JOIN CLIENTES c ON a.CLIENTE_ID = c.NUMERO
+        ORDER BY a.DTFECHA DESC
+    """)
+    abonos_historicos = []
+    for ar in cur.fetchall():
+        ab_id, cli_num, cli_nom, fecha, monto = ar
+        fecha_iso = fecha.strftime('%Y-%m-%d %H:%M:%S') if fecha else datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        abonos_historicos.append({
+            'id': f"ABONO-FDB-{ab_id}",
+            'cliente_id': f"CLI-{cli_num:04d}",
+            'cliente_nombre': fix_encoding(str(cli_nom).strip()) if cli_nom else f"Cliente {cli_num}",
+            'corte_caja_id': "CORTE-FDB-ABONO",
+            'monto': round(float(monto or 0.0), 2),
+            'fecha': fecha_iso,
+        })
+
+    with open(ABONOS_JSON_PATH, 'w', encoding='utf-8') as f:
+        json.dump(abonos_historicos, f, indent=2, ensure_ascii=False)
+    shutil.copy2(ABONOS_JSON_PATH, ASSETS_ABONOS_PATH)
+    print(f"[+] {len(abonos_historicos)} abonos guardados en {ABONOS_JSON_PATH} y {ASSETS_ABONOS_PATH}")
 
     con.close()
     print("=" * 70)

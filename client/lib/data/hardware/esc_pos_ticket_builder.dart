@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import '../../core/string_utils.dart';
 import '../local/models.dart';
 
 enum PaperSize {
@@ -101,7 +102,7 @@ class EscPosTicketBuilder {
     _buffer.add(_alignLeft);
     _writeText('FOLIO: ${data.folio}\n');
     _writeText('FECHA: ${_formatDate(data.fecha)}\n');
-    _writeText('CAJERO: ${data.cajero} | TURNO: ${data.turnoId.substring(0, data.turnoId.length > 8 ? 8 : data.turnoId.length)}\n');
+    _writeText('CAJERO: ${data.cajero} | TURNO: ${data.turnoId.safePrefix(8)}\n');
 
     _writeDivider('-');
 
@@ -235,7 +236,8 @@ class EscPosTicketBuilder {
     sb.writeln('-' * width);
 
     for (final item in data.items) {
-      final name = item.nombre.length > (width - 14) ? item.nombre.substring(0, width - 14) : item.nombre;
+      final int maxNameLen = width > 14 ? width - 14 : width;
+      final name = item.nombre.safePrefix(maxNameLen);
       sb.writeln(_formatTwoColumns('${item.cantidad}x $name', '\$${item.totalLinea.toStringAsFixed(2)}', width));
       if (item.etiquetaPrecio.isNotEmpty && item.etiquetaPrecio != 'Público') {
         sb.writeln('  [Nivel: ${item.etiquetaPrecio}]');

@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS productos (
     precio_cerrajero REAL,               -- Nivel 2: Gremio Cerrajero
     precio_taller REAL,                  -- Nivel 3: Taller Automotriz
     porcentaje_impuesto REAL NOT NULL DEFAULT 0.0,
-    departamento TEXT DEFAULT 'General',
+    departamento TEXT DEFAULT 'Residencial',
+    departamentos_aplicables TEXT DEFAULT 'Todos',
     stock_actual REAL NOT NULL DEFAULT 0.0,
     stock_minimo REAL NOT NULL DEFAULT 5.0,
     es_a_granel INTEGER NOT NULL DEFAULT 0 CHECK (es_a_granel IN (0, 1)),
@@ -76,6 +77,8 @@ CREATE TABLE IF NOT EXISTS ventas (
     id TEXT PRIMARY KEY NOT NULL,
     corte_caja_id TEXT NOT NULL,
     folio_ticket TEXT,
+    cliente_id TEXT DEFAULT 'PUBLICO-GRAL',
+    cliente_nombre TEXT DEFAULT 'Público en General',
     subtotal REAL NOT NULL,
     descuento_total REAL NOT NULL DEFAULT 0.0,
     impuestos_total REAL NOT NULL DEFAULT 0.0,
@@ -99,6 +102,8 @@ CREATE TABLE IF NOT EXISTS detalles_venta (
     costo_historico REAL NOT NULL DEFAULT 0.0,
     descuento_linea REAL NOT NULL DEFAULT 0.0,
     total_linea REAL NOT NULL,
+    insumo_utilizado_id TEXT,
+    cantidad_insumo_consumida REAL NOT NULL DEFAULT 0.0,
     FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE CASCADE,
     FOREIGN KEY (producto_id) REFERENCES productos(id) ON DELETE RESTRICT
 );
@@ -222,3 +227,4 @@ CREATE INDEX IF NOT EXISTS idx_ventas_corte_id ON ventas(corte_caja_id);
 CREATE INDEX IF NOT EXISTS idx_detalles_venta_venta_id ON detalles_venta(venta_id);
 CREATE INDEX IF NOT EXISTS idx_clientes_nombre ON clientes(nombre);
 CREATE INDEX IF NOT EXISTS idx_movimientos_corte_id ON movimientos_caja(corte_caja_id);
+CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id);

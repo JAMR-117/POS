@@ -59,6 +59,7 @@ class _ShiftCutDialogState extends State<ShiftCutDialog> with SingleTickerProvid
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         title: const Text('Confirmación de Cierre Z', style: TextStyle(fontWeight: FontWeight.bold)),
         content: Text(
           '¿Está seguro de cerrar el turno de caja de forma definitiva?\n\n'
@@ -115,6 +116,7 @@ class _ShiftCutDialogState extends State<ShiftCutDialog> with SingleTickerProvid
         },
       },
       child: AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         titlePadding: EdgeInsets.zero,
         contentPadding: const EdgeInsets.all(20),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -138,8 +140,11 @@ class _ShiftCutDialogState extends State<ShiftCutDialog> with SingleTickerProvid
             ],
           ),
         ),
-        content: SizedBox(
-          width: 520,
+        content: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 540,
+            maxHeight: MediaQuery.sizeOf(context).height * 0.88,
+          ),
           child: summary == null
               ? const SizedBox(height: 200, child: Center(child: CircularProgressIndicator()))
               : Column(

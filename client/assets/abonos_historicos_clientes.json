@@ -1,0 +1,1714 @@
+[
+  {
+    "id": "ABONO-FDB-216",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 81.0,
+    "fecha": "2026-09-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-215",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 429.4,
+    "fecha": "2026-09-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-214",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 106.0,
+    "fecha": "2026-09-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-213",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 53.0,
+    "fecha": "2026-09-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-212",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-09-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-211",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 280.1,
+    "fecha": "2026-09-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-210",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 33.0,
+    "fecha": "2026-09-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-209",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 40.0,
+    "fecha": "2026-09-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-208",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 86.0,
+    "fecha": "2026-09-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-207",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 32.0,
+    "fecha": "2026-09-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-206",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 74.0,
+    "fecha": "2026-09-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-205",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 129.1,
+    "fecha": "2026-09-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-204",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-09-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-203",
+    "cliente_id": "CLI-0009",
+    "cliente_nombre": "Hilario",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 191.4,
+    "fecha": "2026-09-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-201",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 85.0,
+    "fecha": "2026-09-03 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-202",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 141.1,
+    "fecha": "2026-09-03 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-200",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-09-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-199",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 148.5,
+    "fecha": "2026-09-01 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-198",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 12.5,
+    "fecha": "2026-08-31 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-197",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 123.1,
+    "fecha": "2026-08-31 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-196",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-08-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-195",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 312.6,
+    "fecha": "2026-08-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-194",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 66.0,
+    "fecha": "2026-08-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-193",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 259.6,
+    "fecha": "2026-08-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-192",
+    "cliente_id": "CLI-0010",
+    "cliente_nombre": "MANUEL HDZ",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 5000.0,
+    "fecha": "2026-08-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-191",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-08-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-189",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 235.0,
+    "fecha": "2026-08-22 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-190",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 277.8,
+    "fecha": "2026-08-22 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-188",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 45.0,
+    "fecha": "2026-08-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-187",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-08-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-186",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 43.1,
+    "fecha": "2026-08-17 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-185",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 115.2,
+    "fecha": "2026-08-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-184",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-08-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-183",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 128.1,
+    "fecha": "2026-08-14 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-180",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-08-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-182",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 24.0,
+    "fecha": "2026-08-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-181",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 236.0,
+    "fecha": "2026-08-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-179",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 144.0,
+    "fecha": "2026-08-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-178",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 235.0,
+    "fecha": "2026-08-10 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-177",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 85.0,
+    "fecha": "2026-08-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-176",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 89.0,
+    "fecha": "2026-08-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-175",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 158.6,
+    "fecha": "2026-08-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-173",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 37.0,
+    "fecha": "2026-08-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-174",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-08-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-172",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-08-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-171",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-07-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-170",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 123.0,
+    "fecha": "2026-07-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-169",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 30.0,
+    "fecha": "2026-07-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-168",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 192.0,
+    "fecha": "2026-07-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-166",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 51.0,
+    "fecha": "2026-07-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-167",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-07-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-165",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 35.0,
+    "fecha": "2026-07-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-164",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 273.5,
+    "fecha": "2026-07-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-163",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 155.5,
+    "fecha": "2026-07-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-162",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 272.0,
+    "fecha": "2026-07-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-160",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 38.9,
+    "fecha": "2026-07-07 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-161",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 265.0,
+    "fecha": "2026-07-07 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-158",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 279.0,
+    "fecha": "2026-07-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-159",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 161.0,
+    "fecha": "2026-07-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-157",
+    "cliente_id": "CLI-0009",
+    "cliente_nombre": "Hilario",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 400.0,
+    "fecha": "2026-07-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-156",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 287.0,
+    "fecha": "2026-07-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-154",
+    "cliente_id": "CLI-0009",
+    "cliente_nombre": "Hilario",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 700.0,
+    "fecha": "2026-06-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-155",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 245.0,
+    "fecha": "2026-06-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-153",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 9.0,
+    "fecha": "2026-06-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-152",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 119.5,
+    "fecha": "2026-06-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-151",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-06-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-149",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 170.0,
+    "fecha": "2026-06-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-150",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.62,
+    "fecha": "2026-06-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-148",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 233.5,
+    "fecha": "2026-06-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-147",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 37.5,
+    "fecha": "2026-06-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-146",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 43.0,
+    "fecha": "2026-06-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-144",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 72.0,
+    "fecha": "2026-06-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-145",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 500.0,
+    "fecha": "2026-06-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-143",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 58.0,
+    "fecha": "2026-06-22 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-142",
+    "cliente_id": "CLI-0008",
+    "cliente_nombre": "Paco",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 32.0,
+    "fecha": "2026-06-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-141",
+    "cliente_id": "CLI-0008",
+    "cliente_nombre": "Paco",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 60.0,
+    "fecha": "2026-06-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-140",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 30.0,
+    "fecha": "2026-06-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-138",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 90.0,
+    "fecha": "2026-06-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-139",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 182.0,
+    "fecha": "2026-06-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-137",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 27.0,
+    "fecha": "2026-06-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-136",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 303.0,
+    "fecha": "2026-06-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-135",
+    "cliente_id": "CLI-0008",
+    "cliente_nombre": "Paco",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 90.0,
+    "fecha": "2026-06-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-134",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 272.0,
+    "fecha": "2026-06-10 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-133",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 260.0,
+    "fecha": "2026-06-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-132",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 76.5,
+    "fecha": "2026-06-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-131",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 518.0,
+    "fecha": "2026-06-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-128",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 19.6,
+    "fecha": "2026-06-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-130",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 20.0,
+    "fecha": "2026-06-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-127",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 160.0,
+    "fecha": "2026-06-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-129",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 241.0,
+    "fecha": "2026-06-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-125",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 51.0,
+    "fecha": "2026-06-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-126",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 74.0,
+    "fecha": "2026-06-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-124",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 295.6,
+    "fecha": "2026-06-03 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-123",
+    "cliente_id": "CLI-0008",
+    "cliente_nombre": "Paco",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 2.5,
+    "fecha": "2026-06-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-122",
+    "cliente_id": "CLI-0008",
+    "cliente_nombre": "Paco",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 215.0,
+    "fecha": "2026-06-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-121",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 109.0,
+    "fecha": "2026-05-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-120",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 151.0,
+    "fecha": "2026-05-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-119",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 35.0,
+    "fecha": "2026-05-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-118",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 218.0,
+    "fecha": "2026-05-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-117",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 29.2,
+    "fecha": "2026-05-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-116",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 290.0,
+    "fecha": "2026-05-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-115",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-05-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-114",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 57.0,
+    "fecha": "2026-05-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-113",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 400.0,
+    "fecha": "2026-05-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-112",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 59.0,
+    "fecha": "2026-05-22 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-111",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 341.5,
+    "fecha": "2026-05-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-110",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 210.0,
+    "fecha": "2026-05-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-109",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 386.5,
+    "fecha": "2026-05-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-107",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-05-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-108",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 19.5,
+    "fecha": "2026-05-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-105",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 250.0,
+    "fecha": "2026-05-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-106",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 59.0,
+    "fecha": "2026-05-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-104",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 80.0,
+    "fecha": "2026-05-07 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-103",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 0.1,
+    "fecha": "2026-05-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-102",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 85.0,
+    "fecha": "2026-05-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-101",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-05-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-100",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-05-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-99",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 300.0,
+    "fecha": "2026-04-30 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-98",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 473.0,
+    "fecha": "2026-04-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-97",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-04-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-96",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 103.0,
+    "fecha": "2026-04-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-95",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 284.0,
+    "fecha": "2026-04-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-94",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 114.5,
+    "fecha": "2026-04-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-93",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-04-06 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-92",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 15.0,
+    "fecha": "2026-04-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-91",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 297.0,
+    "fecha": "2026-04-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-90",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 163.0,
+    "fecha": "2026-04-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-87",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-03-31 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-89",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 26.0,
+    "fecha": "2026-03-31 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-88",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 84.9,
+    "fecha": "2026-03-31 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-86",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 170.0,
+    "fecha": "2026-03-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-85",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 56.0,
+    "fecha": "2026-03-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-84",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 550.0,
+    "fecha": "2026-03-27 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-81",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 65.0,
+    "fecha": "2026-03-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-83",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 76.0,
+    "fecha": "2026-03-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-82",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 234.0,
+    "fecha": "2026-03-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-80",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-03-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-79",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 235.0,
+    "fecha": "2026-03-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-78",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 104.0,
+    "fecha": "2026-03-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-77",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 110.0,
+    "fecha": "2026-03-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-76",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 254.5,
+    "fecha": "2026-03-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-75",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 557.5,
+    "fecha": "2026-03-17 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-74",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 55.0,
+    "fecha": "2026-03-14 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-73",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 42.6,
+    "fecha": "2026-03-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-72",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 415.4,
+    "fecha": "2026-03-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-71",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 34.0,
+    "fecha": "2026-03-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-70",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 218.0,
+    "fecha": "2026-03-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-69",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 206.0,
+    "fecha": "2026-03-04 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-67",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 150.0,
+    "fecha": "2026-03-03 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-68",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 150.0,
+    "fecha": "2026-03-03 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-66",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-03-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-65",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 183.5,
+    "fecha": "2026-03-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-64",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 86.5,
+    "fecha": "2026-02-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-63",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 54.0,
+    "fecha": "2026-02-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-62",
+    "cliente_id": "CLI-0007",
+    "cliente_nombre": "Ivan Domingo",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 80.5,
+    "fecha": "2026-02-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-61",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 44.5,
+    "fecha": "2026-02-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-60",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.2,
+    "fecha": "2026-02-25 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-59",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-02-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-58",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-02-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-55",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 65.5,
+    "fecha": "2026-02-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-57",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 70.0,
+    "fecha": "2026-02-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-56",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 195.0,
+    "fecha": "2026-02-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-54",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 538.8,
+    "fecha": "2026-02-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-52",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 22.0,
+    "fecha": "2026-02-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-53",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 352.4,
+    "fecha": "2026-02-20 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-51",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 70.0,
+    "fecha": "2026-02-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-50",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 150.0,
+    "fecha": "2026-02-18 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-48",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 672.0,
+    "fecha": "2026-02-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-47",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 91.0,
+    "fecha": "2026-02-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-45",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 102.0,
+    "fecha": "2026-02-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-49",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 179.5,
+    "fecha": "2026-02-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-46",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 232.5,
+    "fecha": "2026-02-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-44",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 50.0,
+    "fecha": "2026-02-12 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-43",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 392.9,
+    "fecha": "2026-02-11 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-42",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 92.0,
+    "fecha": "2026-02-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-41",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 232.0,
+    "fecha": "2026-02-07 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-40",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-02-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-39",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 336.0,
+    "fecha": "2026-02-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-36",
+    "cliente_id": "CLI-0006",
+    "cliente_nombre": "Jesus",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 970.4,
+    "fecha": "2026-02-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-37",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 77.0,
+    "fecha": "2026-02-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-38",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 205.0,
+    "fecha": "2026-02-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-34",
+    "cliente_id": "CLI-0006",
+    "cliente_nombre": "Jesus",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 950.0,
+    "fecha": "2026-01-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-35",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 452.0,
+    "fecha": "2026-01-29 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-31",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 150.0,
+    "fecha": "2026-01-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-32",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 177.0,
+    "fecha": "2026-01-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-33",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 190.0,
+    "fecha": "2026-01-28 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-30",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2026-01-26 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-29",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 85.0,
+    "fecha": "2026-01-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-27",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 111.0,
+    "fecha": "2026-01-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-28",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 124.0,
+    "fecha": "2026-01-24 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-26",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 80.0,
+    "fecha": "2026-01-23 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-24",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 116.5,
+    "fecha": "2026-01-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-25",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 470.5,
+    "fecha": "2026-01-21 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-23",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 250.0,
+    "fecha": "2026-01-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-22",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 500.0,
+    "fecha": "2026-01-19 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-21",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 260.0,
+    "fecha": "2026-01-17 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-20",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 110.0,
+    "fecha": "2026-01-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-19",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 55.0,
+    "fecha": "2026-01-15 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-18",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-01-14 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-16",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 197.5,
+    "fecha": "2026-01-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-17",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 100.0,
+    "fecha": "2026-01-13 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-15",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 150.0,
+    "fecha": "2026-01-12 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-14",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 72.0,
+    "fecha": "2026-01-10 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-13",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 120.0,
+    "fecha": "2026-01-09 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-12",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 185.0,
+    "fecha": "2026-01-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-11",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 138.5,
+    "fecha": "2026-01-07 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-10",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 7.5,
+    "fecha": "2026-01-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-9",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 35.0,
+    "fecha": "2026-01-05 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-8",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 5.0,
+    "fecha": "2025-12-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-6",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 80.0,
+    "fecha": "2025-12-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-7",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 156.0,
+    "fecha": "2025-12-16 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-5",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 170.0,
+    "fecha": "2025-12-08 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-4",
+    "cliente_id": "CLI-0005",
+    "cliente_nombre": "Jose Luis",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 200.0,
+    "fecha": "2025-12-02 00:00:00"
+  },
+  {
+    "id": "ABONO-FDB-3",
+    "cliente_id": "CLI-0004",
+    "cliente_nombre": "Toño",
+    "corte_caja_id": "CORTE-FDB-ABONO",
+    "monto": 400.0,
+    "fecha": "2025-11-28 00:00:00"
+  }
+]

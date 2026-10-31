@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../core/department_theme.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/product_repository.dart';
 import '../../data/repositories/sales_repository.dart';
@@ -270,16 +271,17 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: const Row(
               children: [
-                SizedBox(width: 100, child: Text('CLAVE/SKU', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 95, child: Text('CLAVE/SKU', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
                 Expanded(flex: 3, child: Text('DESCRIPCIÓN / PRODUCTO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 80, child: Text('MARCA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 130, child: Text('MOLDE (EQ.)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 100, child: Text('UBICACIÓN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 70, child: Text('STOCK', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 80, child: Text('PÚBLICO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 85, child: Text('CERRAJERO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 80, child: Text('TALLER', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-                SizedBox(width: 85, child: Text('MAYOREO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 140, child: Text('DEPARTAMENTO', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 75, child: Text('MARCA', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 115, child: Text('MOLDE (EQ.)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 90, child: Text('UBICACIÓN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 65, child: Text('STOCK', textAlign: TextAlign.center, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 75, child: Text('PÚBLICO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 80, child: Text('CERRAJERO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 75, child: Text('TALLER', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                SizedBox(width: 80, child: Text('MAYOREO', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
               ],
             ),
           ),
@@ -320,7 +322,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                     child: Row(
                       children: [
                         SizedBox(
-                          width: 100,
+                          width: 95,
                           child: Text(
                             p.sku ?? p.codigoBarras ?? '-',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1F4E79)),
@@ -344,7 +346,14 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 80,
+                          width: 140,
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: DepartmentBadge(departamento: p.departamento, compact: true),
+                          ),
+                        ),
+                        SizedBox(
+                          width: 75,
                           child: Text(
                             p.marca ?? '-',
                             style: const TextStyle(fontSize: 12),
@@ -352,7 +361,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 130,
+                          width: 115,
                           child: p.codigoEquivalencia != null && p.codigoEquivalencia!.isNotEmpty
                               ? Tooltip(
                                   message: 'Ver variantes y alternativas de Molde: ${p.codigoEquivalencia}',
@@ -394,7 +403,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                               : const Text('-', style: TextStyle(color: Colors.grey)),
                         ),
                         SizedBox(
-                          width: 100,
+                          width: 90,
                           child: p.ubicacion != null && p.ubicacion!.isNotEmpty
                               ? Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
@@ -412,7 +421,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                               : const Text('-', style: TextStyle(color: Colors.grey)),
                         ),
                         SizedBox(
-                          width: 70,
+                          width: 65,
                           child: Container(
                             alignment: Alignment.center,
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -427,7 +436,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 80,
+                          width: 75,
                           child: Text(
                             '\$${p.precioVenta.toStringAsFixed(2)}',
                             textAlign: TextAlign.right,
@@ -435,7 +444,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 85,
+                          width: 80,
                           child: Text(
                             p.precioCerrajero != null ? '\$${p.precioCerrajero!.toStringAsFixed(2)}' : '-',
                             textAlign: TextAlign.right,
@@ -443,7 +452,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 80,
+                          width: 75,
                           child: Text(
                             p.precioTaller != null ? '\$${p.precioTaller!.toStringAsFixed(2)}' : '-',
                             textAlign: TextAlign.right,
@@ -451,7 +460,7 @@ class _AdvancedProductSearchDialogState extends State<AdvancedProductSearchDialo
                           ),
                         ),
                         SizedBox(
-                          width: 85,
+                          width: 80,
                           child: Text(
                             p.precioMayoreo != null ? '\$${p.precioMayoreo!.toStringAsFixed(2)}' : '-',
                             textAlign: TextAlign.right,

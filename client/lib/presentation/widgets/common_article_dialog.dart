@@ -33,6 +33,7 @@ class _CommonArticleDialogState extends State<CommonArticleDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.fastfood_outlined, color: Color(0xFF1F4E79)),
@@ -40,36 +41,41 @@ class _CommonArticleDialogState extends State<CommonArticleDialog> {
           Text('Artículo Común', style: TextStyle(fontWeight: FontWeight.bold)),
         ],
       ),
-      content: SizedBox(
-        width: 300,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _montoController,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
-              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-              decoration: const InputDecoration(
-                labelText: 'Monto a cobrar (\$)',
-                prefixIcon: Icon(Icons.attach_money),
-                border: OutlineInputBorder(),
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 340,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _montoController,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+                style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                decoration: const InputDecoration(
+                  labelText: 'Monto a cobrar (\$)',
+                  prefixIcon: Icon(Icons.attach_money),
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _submit(),
               ),
-              onSubmitted: (_) => _submit(),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _descController,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Descripción (Opcional)',
-                hintText: 'Ej. Copias, Servicio, Varios...',
-                border: OutlineInputBorder(),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _descController,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Descripción (Opcional)',
+                  hintText: 'Ej. Copias, Servicio, Varios...',
+                  border: OutlineInputBorder(),
+                ),
+                onSubmitted: (_) => _submit(),
               ),
-              onSubmitted: (_) => _submit(),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       actions: [

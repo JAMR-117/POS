@@ -51,6 +51,7 @@ class _AdminAuthDialogState extends State<AdminAuthDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.security, color: Color(0xFFD32F2F)),
@@ -58,9 +59,15 @@ class _AdminAuthDialogState extends State<AdminAuthDialog> {
           Text('Autorización Requerida'),
         ],
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 360,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
           const Text('Esta acción requiere permisos de Administrador. Ingrese el PIN de autorización:'),
           const SizedBox(height: 16),
           if (_error != null)
@@ -80,6 +87,8 @@ class _AdminAuthDialogState extends State<AdminAuthDialog> {
             onSubmitted: (_) => _validatePin(),
           ),
         ],
+      ),
+      ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),

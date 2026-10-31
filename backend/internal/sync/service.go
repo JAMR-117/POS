@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"pos-backend/internal/store"
@@ -268,14 +269,14 @@ func (s *Service) handleProductoUpsert(ctx context.Context, tx pgx.Tx, event Syn
 			id, tienda_id, codigo_barras, sku, nombre, descripcion, marca,
 			codigo_equivalencia, ubicacion, precio_compra, precio_venta,
 			precio_cerrajero, precio_taller, precio_mayoreo, cantidad_mayoreo,
-			stock_minimo, es_servicio, insumo_vinculado_id, cantidad_insumo,
+			stock_minimo, es_servicio, departamentos_aplicables, insumo_vinculado_id, cantidad_insumo,
 			departamento, stock_actual, es_a_granel, updated_at
 		) VALUES (
 			$1, (SELECT id FROM tiendas WHERE activo = true LIMIT 1), $2, $3, $4, $5, $6,
 			$7, $8, $9, $10,
 			$11, $12, $13, $14,
-			$15, $16, NULLIF($17, ''), $18,
-			$19, $20, $21, NOW()
+			$15, $16, $17, NULLIF($18, ''), $19,
+			$20, $21, $22, NOW()
 		)
 		ON CONFLICT (id) DO UPDATE SET
 			codigo_barras = EXCLUDED.codigo_barras,
@@ -293,6 +294,7 @@ func (s *Service) handleProductoUpsert(ctx context.Context, tx pgx.Tx, event Syn
 			cantidad_mayoreo = EXCLUDED.cantidad_mayoreo,
 			stock_minimo = EXCLUDED.stock_minimo,
 			es_servicio = EXCLUDED.es_servicio,
+			departamentos_aplicables = EXCLUDED.departamentos_aplicables,
 			insumo_vinculado_id = EXCLUDED.insumo_vinculado_id,
 			cantidad_insumo = EXCLUDED.cantidad_insumo,
 			departamento = EXCLUDED.departamento,
@@ -315,6 +317,11 @@ func (s *Service) handleProductoUpsert(ctx context.Context, tx pgx.Tx, event Syn
 		insumoIDStr = *p.InsumoVinculadoID
 	}
 
+	deptosAplicables := p.DepartamentosAplicables
+	if deptosAplicables == "" {
+		deptosAplicables = "Todos"
+	}
+
 	cantInsumo := p.CantidadInsumo
 	if cantInsumo <= 0 {
 		cantInsumo = 1.0
@@ -329,7 +336,7 @@ func (s *Service) handleProductoUpsert(ctx context.Context, tx pgx.Tx, event Syn
 		p.ID, p.CodigoBarras, p.SKU, nombre, desc, p.Marca,
 		p.CodigoEquivalencia, p.Ubicacion, p.PrecioCompra, p.PrecioVenta,
 		p.PrecioCerrajero, p.PrecioTaller, p.PrecioMayoreo, p.CantidadMayoreo,
-		stockMin, p.EsServicio, insumoIDStr, cantInsumo,
+		stockMin, p.EsServicio, deptosAplicables, insumoIDStr, cantInsumo,
 		p.Departamento, p.StockActual, esGranel,
 	)
 	return err
@@ -400,15 +407,24 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 		tiendaID = "tienda-001"
 	}
 
+	clienteID := "PUBLICO-GRAL"
+	if payload.ClienteID != nil && *payload.ClienteID != "" {
+		clienteID = *payload.ClienteID
+	}
+	clienteNombre := "Público en General"
+	if payload.ClienteNombre != nil && *payload.ClienteNombre != "" {
+		clienteNombre = *payload.ClienteNombre
+	}
+
 	insertVentaSQL := `
 		INSERT INTO ventas (
-			id, tienda_id, terminal_id, corte_caja_id, folio_ticket, 
+			id, tienda_id, terminal_id, corte_caja_id, cliente_id, cliente_nombre, folio_ticket, 
 			subtotal, descuento_total, impuestos_total, total, 
 			pagos_desglose, fecha_venta, created_at
 		) VALUES (
-			$1, $2, $3, NULLIF($4, ''), $5, 
-			$6, $7, $8, $9, 
-			$10, $11, NOW()
+			$1, $2, $3, NULLIF($4, ''), $5, $6, $7, 
+			$8, $9, $10, $11, 
+			$12, $13, NOW()
 		)
 		ON CONFLICT (id) DO NOTHING;
 	`
@@ -417,6 +433,8 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 		tiendaID,
 		terminalID,
 		payload.CorteCajaID,
+		clienteID,
+		clienteNombre,
 		payload.FolioTicket,
 		payload.Totales.Subtotal,
 		payload.Totales.Descuentos,
@@ -431,6 +449,14 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			return fmt.Errorf("DB_ERROR_VENTA [%s]: %s", pgErr.Code, pgErr.Message)
 		}
 		return fmt.Errorf("INSERT_VENTA_FAILED: %w", err)
+	}
+
+	// Si hubo pago a crédito atribuido a un cliente registrado, actualizar saldo deudor
+	for _, p := range payload.Pagos {
+		metodoLower := strings.ToLower(p.Metodo)
+		if (strings.Contains(metodoLower, "crédit") || strings.Contains(metodoLower, "credit")) && clienteID != "PUBLICO-GRAL" {
+			_, _ = tx.Exec(ctx, `UPDATE clientes SET saldo_deudor = COALESCE(saldo_deudor, 0) + $1 WHERE id = $2;`, p.Monto, clienteID)
+		}
 	}
 
 	for _, item := range payload.Items {
@@ -448,6 +474,16 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			}
 		}
 
+		if item.InsumoUtilizadoID != nil && *item.InsumoUtilizadoID != "" {
+			var dynExists bool
+			_ = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM productos WHERE id = $1);`, *item.InsumoUtilizadoID).Scan(&dynExists)
+			if !dynExists {
+				if _, err := tx.Exec(ctx, ensureProductSQL, *item.InsumoUtilizadoID, tiendaID, "Insumo Dinámico", 0.0); err != nil {
+					return fmt.Errorf("ENSURE_DYNAMIC_INSUMO_FAILED (%s): %w", *item.InsumoUtilizadoID, err)
+				}
+			}
+		}
+
 		if item.InsumoVinculadoID != nil && *item.InsumoVinculadoID != "" {
 			var insExists bool
 			_ = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM productos WHERE id = $1);`, *item.InsumoVinculadoID).Scan(&insExists)
@@ -458,13 +494,20 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			}
 		}
 
+		var insumoUtilizadoStr string
+		if item.InsumoUtilizadoID != nil {
+			insumoUtilizadoStr = *item.InsumoUtilizadoID
+		}
+
 		insertDetalleSQL := `
 			INSERT INTO detalles_venta (
 				id, venta_id, producto_id, cantidad, 
-				precio_historico, costo_historico, descuento_linea, total_linea
+				precio_historico, costo_historico, descuento_linea, total_linea,
+				insumo_utilizado_id, cantidad_insumo_consumida
 			) VALUES (
 				$1, $2, $3, $4, 
-				$5, $6, $7, $8
+				$5, $6, $7, $8,
+				NULLIF($9, ''), $10
 			)
 			ON CONFLICT (id) DO NOTHING;
 		`
@@ -477,6 +520,8 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			item.CostoHistorico,
 			item.DescuentoLinea,
 			item.TotalLinea,
+			insumoUtilizadoStr,
+			item.CantidadInsumoConsumida,
 		); err != nil {
 			return fmt.Errorf("INSERT_DETALLE_FAILED (%s): %w", item.ID, err)
 		}
@@ -490,11 +535,32 @@ func (s *Service) handleVentaRegistrada(ctx context.Context, tx pgx.Tx, terminal
 			    updated_at = NOW()
 			WHERE id = $3;
 		`
-		if _, err := tx.Exec(ctx, updateStockSQL, item.Cantidad, payload.Timestamp, item.ProductoID); err != nil {
-			return fmt.Errorf("UPDATE_STOCK_FAILED (%s): %w", item.ProductoID, err)
+
+		// A. Servicio con Insumo Dinámico vinculado en caja (Dynamic Runtime BOM)
+		if insumoUtilizadoStr != "" && item.CantidadInsumoConsumida > 0 {
+			if _, err := tx.Exec(ctx, updateStockSQL, item.CantidadInsumoConsumida, payload.Timestamp, insumoUtilizadoStr); err != nil {
+				return fmt.Errorf("UPDATE_DYNAMIC_INSUMO_STOCK_FAILED (%s): %w", insumoUtilizadoStr, err)
+			}
+			continue
 		}
 
-		// Si es servicio con insumo vinculado, descontar también del insumo virgen
+		// B. Producto físico normal (es_servicio = 0)
+		if item.ProductoID != "ART-COMUN" && item.EsServicio == 0 {
+			updatePhysicalSQL := `
+				UPDATE productos 
+				SET stock_actual = stock_actual - $1,
+				    total_unidades_vendidas = total_unidades_vendidas + $1,
+				    ventas_ultimos_30dias = ventas_ultimos_30dias + $1,
+				    ultima_venta_at = $2,
+				    updated_at = NOW()
+				WHERE id = $3 AND COALESCE(es_servicio, 0) = 0;
+			`
+			if _, err := tx.Exec(ctx, updatePhysicalSQL, item.Cantidad, payload.Timestamp, item.ProductoID); err != nil {
+				return fmt.Errorf("UPDATE_STOCK_FAILED (%s): %w", item.ProductoID, err)
+			}
+		}
+
+		// C. Compatibilidad legacy: servicio con insumo fijo
 		if item.InsumoVinculadoID != nil && *item.InsumoVinculadoID != "" {
 			cantInsumo := item.CantidadInsumo
 			if cantInsumo <= 0 {
@@ -525,26 +591,61 @@ func (s *Service) handleVentaCancelada(ctx context.Context, tx pgx.Tx, terminalI
 		return nil
 	}
 
-	rows, err := tx.Query(ctx, `SELECT producto_id, cantidad FROM detalles_venta WHERE venta_id = $1`, payload.VentaID)
+	rows, err := tx.Query(ctx, `
+		SELECT d.producto_id,
+		       d.cantidad,
+		       COALESCE(d.insumo_utilizado_id, ''),
+		       COALESCE(d.cantidad_insumo_consumida, 0),
+		       COALESCE(p.es_servicio, 0),
+		       COALESCE(p.insumo_vinculado_id, ''),
+		       COALESCE(p.cantidad_insumo, 1.0)
+		FROM detalles_venta d
+		LEFT JOIN productos p ON d.producto_id = p.id
+		WHERE d.venta_id = $1
+	`, payload.VentaID)
 	if err != nil {
 		return nil
 	}
 	defer rows.Close()
 
+	type restoreOp struct {
+		targetID string
+		qty      float64
+	}
+	var ops []restoreOp
+
 	for rows.Next() {
-		var prodID string
-		var qty float64
-		if err := rows.Scan(&prodID, &qty); err == nil {
-			updateStockSQL := `
-				UPDATE productos 
-				SET stock_actual = stock_actual + $1,
-				    total_unidades_vendidas = GREATEST(0, total_unidades_vendidas - $1),
-				    ventas_ultimos_30dias = GREATEST(0, ventas_ultimos_30dias - $1),
-				    updated_at = NOW()
-				WHERE id = $2;
-			`
-			_, _ = tx.Exec(ctx, updateStockSQL, qty, prodID)
+		var prodID, insumoUtilizadoID, insumoVinculadoID string
+		var qty, cantInsumoConsumida, cantInsumo float64
+		var esServicio int
+		if err := rows.Scan(&prodID, &qty, &insumoUtilizadoID, &cantInsumoConsumida, &esServicio, &insumoVinculadoID, &cantInsumo); err == nil {
+			if prodID == "ART-COMUN" {
+				continue
+			}
+			if insumoUtilizadoID != "" && cantInsumoConsumida > 0 {
+				ops = append(ops, restoreOp{targetID: insumoUtilizadoID, qty: cantInsumoConsumida})
+			} else if esServicio == 1 && insumoVinculadoID != "" && qty > 0 {
+				if cantInsumo <= 0 {
+					cantInsumo = 1.0
+				}
+				ops = append(ops, restoreOp{targetID: insumoVinculadoID, qty: qty * cantInsumo})
+			} else if esServicio == 0 && qty > 0 {
+				ops = append(ops, restoreOp{targetID: prodID, qty: qty})
+			}
 		}
+	}
+	rows.Close()
+
+	restoreStockSQL := `
+		UPDATE productos 
+		SET stock_actual = stock_actual + $1,
+		    total_unidades_vendidas = GREATEST(0, total_unidades_vendidas - $1),
+		    ventas_ultimos_30dias = GREATEST(0, ventas_ultimos_30dias - $1),
+		    updated_at = NOW()
+		WHERE id = $2;
+	`
+	for _, op := range ops {
+		_, _ = tx.Exec(ctx, restoreStockSQL, op.qty, op.targetID)
 	}
 	return nil
 }
@@ -692,30 +793,35 @@ func (s *Service) PullUpdates(ctx context.Context, tiendaID string) (*PullRespon
 		}
 		prods := s.localStore.GetAllProducts()
 		for _, p := range prods {
+			deptosAplic := p.DepartamentosAplicables
+			if deptosAplic == "" {
+				deptosAplic = "Todos"
+			}
 			resp.Products = append(resp.Products, ProductPullDTO{
-				ID:                    p.ID,
-				CodigoBarras:          p.CodigoBarras,
-				SKU:                   p.SKU,
-				Nombre:                p.Nombre,
-				Descripcion:           p.Descripcion,
-				Marca:                 nullableStr(p.Marca),
-				CodigoEquivalencia:    p.CodigoEquivalencia,
-				Ubicacion:             p.Ubicacion,
-				Departamento:          p.Departamento,
-				PrecioCompra:          p.PrecioCompra,
-				PrecioVenta:           p.PrecioVenta,
-				PrecioCerrajero:       p.PrecioCerrajero,
-				PrecioTaller:          p.PrecioTaller,
-				PrecioMayoreo:         p.PrecioMayoreo,
-				CantidadMayoreo:       p.CantidadMayoreo,
-				StockActual:           p.StockActual,
-				StockMinimo:           p.StockMinimo,
-				EsAGranel:             p.EsAGranel,
-				EsServicio:            p.EsServicio,
-				VentasUltimos30Dias:   p.VentasUltimos30Dias,
-				TotalUnidadesVendidas: p.TotalUnidadesVendidas,
-				UltimaVentaAt:         p.UltimaVentaAt,
-				UpdatedAt:             time.Now().UTC(),
+				ID:                      p.ID,
+				CodigoBarras:            p.CodigoBarras,
+				SKU:                     p.SKU,
+				Nombre:                  p.Nombre,
+				Descripcion:             p.Descripcion,
+				Marca:                   nullableStr(p.Marca),
+				CodigoEquivalencia:      p.CodigoEquivalencia,
+				Ubicacion:               p.Ubicacion,
+				Departamento:            p.Departamento,
+				PrecioCompra:            p.PrecioCompra,
+				PrecioVenta:             p.PrecioVenta,
+				PrecioCerrajero:         p.PrecioCerrajero,
+				PrecioTaller:            p.PrecioTaller,
+				PrecioMayoreo:           p.PrecioMayoreo,
+				CantidadMayoreo:         p.CantidadMayoreo,
+				StockActual:             p.StockActual,
+				StockMinimo:             p.StockMinimo,
+				EsAGranel:               p.EsAGranel,
+				EsServicio:              p.EsServicio,
+				DepartamentosAplicables: deptosAplic,
+				VentasUltimos30Dias:     p.VentasUltimos30Dias,
+				TotalUnidadesVendidas:   p.TotalUnidadesVendidas,
+				UltimaVentaAt:           p.UltimaVentaAt,
+				UpdatedAt:               time.Now().UTC(),
 			})
 		}
 		resp.ProductsCount = len(resp.Products)
@@ -730,6 +836,7 @@ func (s *Service) PullUpdates(ctx context.Context, tiendaID string) (*PullRespon
 			codigo_equivalencia, ubicacion, departamento, precio_compra, precio_venta,
 			precio_cerrajero, precio_taller, precio_mayoreo, cantidad_mayoreo,
 			stock_actual, stock_minimo, es_a_granel, es_servicio,
+			COALESCE(departamentos_aplicables, 'Todos'),
 			insumo_vinculado_id, cantidad_insumo,
 			ventas_ultimos_30dias, total_unidades_vendidas, ultima_venta_at, updated_at
 		FROM productos
@@ -747,6 +854,7 @@ func (s *Service) PullUpdates(ctx context.Context, tiendaID string) (*PullRespon
 				&p.CodigoEquivalencia, &p.Ubicacion, &p.Departamento, &p.PrecioCompra, &p.PrecioVenta,
 				&p.PrecioCerrajero, &p.PrecioTaller, &p.PrecioMayoreo, &p.CantidadMayoreo,
 				&p.StockActual, &p.StockMinimo, &esGranel, &p.EsServicio,
+				&p.DepartamentosAplicables,
 				&p.InsumoVinculadoID, &p.CantidadInsumo,
 				&p.VentasUltimos30Dias, &p.TotalUnidadesVendidas, &p.UltimaVentaAt, &p.UpdatedAt,
 			)

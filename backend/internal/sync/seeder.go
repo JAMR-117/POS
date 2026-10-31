@@ -82,6 +82,13 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 	tiendaID := "8377312b-9a2a-4d0f-b74d-f2e0ca6c4d2a"
 	var tiendaExiste bool
 	if dbPool != nil {
+		// Asegurar migración automática de columnas nuevas (000005_dynamic_service_bom)
+		_, _ = dbPool.Exec(ctx, `
+			ALTER TABLE productos ADD COLUMN IF NOT EXISTS departamentos_aplicables TEXT NOT NULL DEFAULT 'Todos';
+			ALTER TABLE detalles_venta ADD COLUMN IF NOT EXISTS insumo_utilizado_id VARCHAR(100);
+			ALTER TABLE detalles_venta ADD COLUMN IF NOT EXISTS cantidad_insumo_consumida NUMERIC(12, 3) NOT NULL DEFAULT 0.0;
+		`)
+
 		_ = dbPool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM tiendas WHERE id = $1);`, tiendaID).Scan(&tiendaExiste)
 		if !tiendaExiste {
 			_, _ = dbPool.Exec(ctx, `
@@ -97,15 +104,15 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 			id, tienda_id, codigo_barras, sku, nombre, descripcion, marca,
 			codigo_equivalencia, ubicacion, departamento, precio_compra, precio_venta,
 			precio_cerrajero, precio_taller, precio_mayoreo, cantidad_mayoreo,
-			stock_actual, stock_minimo, es_a_granel, es_servicio,
+			stock_actual, stock_minimo, es_a_granel, es_servicio, departamentos_aplicables,
 			ventas_ultimos_30dias, total_unidades_vendidas, ultima_venta_at,
 			created_at, updated_at
 		) VALUES (
 			$1, $2, $3, $4, $5, $6, $7,
 			$8, $9, $10, $11, $12,
 			$13, $14, $15, $16,
-			$17, $18, $19, $20,
-			$21, $22, $23,
+			$17, $18, $19, $20, $21,
+			$22, $23, $24,
 			NOW(), NOW()
 		)
 		ON CONFLICT (id) DO UPDATE SET
@@ -122,6 +129,9 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 			precio_mayoreo = EXCLUDED.precio_mayoreo,
 			cantidad_mayoreo = EXCLUDED.cantidad_mayoreo,
 			stock_minimo = EXCLUDED.stock_minimo,
+			es_servicio = EXCLUDED.es_servicio,
+			departamentos_aplicables = EXCLUDED.departamentos_aplicables,
+			insumo_vinculado_id = NULL,
 			ventas_ultimos_30dias = GREATEST(productos.ventas_ultimos_30dias, EXCLUDED.ventas_ultimos_30dias),
 			total_unidades_vendidas = GREATEST(productos.total_unidades_vendidas, EXCLUDED.total_unidades_vendidas),
 			ultima_venta_at = COALESCE(EXCLUDED.ultima_venta_at, productos.ultima_venta_at),
@@ -196,6 +206,10 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 		granelInt, _ := strconv.Atoi(getVal("es_a_granel"))
 		esGranel := granelInt == 1
 		servInt, _ := strconv.Atoi(getVal("es_servicio"))
+		deptosAplic := getVal("departamentos_aplicables")
+		if deptosAplic == "" {
+			deptosAplic = "Todos"
+		}
 
 		v30d, _ := strconv.ParseFloat(getVal("ventas_ultimos_30dias"), 64)
 		totVendidas, _ := strconv.ParseFloat(getVal("total_unidades_vendidas"), 64)
@@ -216,7 +230,7 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 				id, tiendaID, codigo, sku, nombre, desc, marca,
 				nullableStr(molde), nullableStr(ubi), depto, pCompra, pVenta,
 				nullableFloat(pCerrajero), nullableFloat(pTaller), nullableFloat(pMayoreo), nullableFloat(cantMayoreo),
-				stockActual, stockMin, esGranel, servInt,
+				stockActual, stockMin, esGranel, servInt, deptosAplic,
 				v30d, totVendidas, ultVenta,
 			)
 			if err != nil {
@@ -227,7 +241,7 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 				id, tiendaID, codigo, sku, nombre, desc, marca,
 				nullableStr(molde), nullableStr(ubi), depto, pCompra, pVenta,
 				nullableFloat(pCerrajero), nullableFloat(pTaller), nullableFloat(pMayoreo), nullableFloat(cantMayoreo),
-				stockActual, stockMin, esGranel, servInt,
+				stockActual, stockMin, esGranel, servInt, deptosAplic,
 				v30d, totVendidas, ultVenta,
 			)
 			if err != nil {
@@ -237,28 +251,29 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 
 		if localStore != nil {
 			localProds = append(localProds, store.Product{
-				ID:                    id,
-				CodigoBarras:          &codigo,
-				SKU:                   &sku,
-				Nombre:                nombre,
-				Descripcion:           desc,
-				Marca:                 marca,
-				CodigoEquivalencia:    nullableStr(molde),
-				Ubicacion:             nullableStr(ubi),
-				Departamento:          depto,
-				PrecioCompra:          pCompra,
-				PrecioVenta:           pVenta,
-				PrecioCerrajero:       nullableFloat(pCerrajero),
-				PrecioTaller:          nullableFloat(pTaller),
-				PrecioMayoreo:         nullableFloat(pMayoreo),
-				CantidadMayoreo:       nullableFloat(cantMayoreo),
-				StockActual:           stockActual,
-				StockMinimo:           stockMin,
-				EsAGranel:             granelInt,
-				EsServicio:            servInt,
-				VentasUltimos30Dias:   v30d,
-				TotalUnidadesVendidas: totVendidas,
-				UltimaVentaAt:         ultVenta,
+				ID:                      id,
+				CodigoBarras:            &codigo,
+				SKU:                     &sku,
+				Nombre:                  nombre,
+				Descripcion:             desc,
+				Marca:                   marca,
+				CodigoEquivalencia:      nullableStr(molde),
+				Ubicacion:               nullableStr(ubi),
+				Departamento:            depto,
+				PrecioCompra:            pCompra,
+				PrecioVenta:             pVenta,
+				PrecioCerrajero:         nullableFloat(pCerrajero),
+				PrecioTaller:            nullableFloat(pTaller),
+				PrecioMayoreo:           nullableFloat(pMayoreo),
+				CantidadMayoreo:         nullableFloat(cantMayoreo),
+				StockActual:             stockActual,
+				StockMinimo:             stockMin,
+				EsAGranel:               granelInt,
+				EsServicio:              servInt,
+				DepartamentosAplicables: deptosAplic,
+				VentasUltimos30Dias:     v30d,
+				TotalUnidadesVendidas:   totVendidas,
+				UltimaVentaAt:           ultVenta,
 			})
 		}
 
@@ -269,6 +284,21 @@ func seedCatalog(ctx context.Context, dbPool *pgxpool.Pool, localStore *store.St
 		if err := tx.Commit(ctx); err != nil {
 			log.Printf("[SEEDER] Error al confirmar transacción de productos: %v", err)
 		}
+	}
+
+	// Purgar de PostgreSQL artículos obsoletos/fragmentados que ya no existen en el catálogo limpio
+	if dbPool != nil && len(localProds) > 0 {
+		validIDs := make([]string, 0, len(localProds)+1)
+		for _, lp := range localProds {
+			validIDs = append(validIDs, lp.ID)
+		}
+		validIDs = append(validIDs, "ART-COMUN")
+		_, _ = dbPool.Exec(ctx, `
+			DELETE FROM productos
+			WHERE NOT (id = ANY($1))
+			  AND id NOT IN (SELECT DISTINCT producto_id FROM detalles_venta WHERE producto_id IS NOT NULL)
+			  AND id NOT IN (SELECT DISTINCT insumo_utilizado_id FROM detalles_venta WHERE insumo_utilizado_id IS NOT NULL);
+		`, validIDs)
 	}
 
 	if localStore != nil && len(localProds) > 0 {

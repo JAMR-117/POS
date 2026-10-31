@@ -99,6 +99,7 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       title: const Row(
         children: [
           Icon(Icons.add_shopping_cart, color: Color(0xFF1F4E79)),
@@ -106,8 +107,11 @@ class _QuickProductFormDialogState extends State<QuickProductFormDialog> {
           Text('Alta Rápida de Producto', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
         ],
       ),
-      content: SizedBox(
-        width: 440,
+      content: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 460,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
+        ),
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,

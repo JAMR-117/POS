@@ -27,7 +27,7 @@ class SalesHistoryScreen extends StatefulWidget {
 class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
   final SalesRepository _salesRepo = SalesRepository();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<SaleRecord> _sales = [];
   bool _isLoading = true;
 
@@ -94,6 +94,70 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
     }
   }
 
+  Future<void> _confirmCancelFullTicket(SaleRecord sale, List<SaleDetailItem> details) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Cancelar Ticket ${sale.folioTicket}'),
+        content: SizedBox(
+          width: 440,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '¿Estás seguro de cancelar por completo este ticket?\n\nSe reintegrarán automáticamente al inventario todos los productos físicos e insumos consumidos en servicios:',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 10),
+              ...details.where((d) => d.cantidad > 0).map((d) {
+                final insumoNote = d.hasDynamicInsumo
+                    ? ' -> Reintegra ${d.cantidadInsumoConsumida.toStringAsFixed(d.cantidadInsumoConsumida % 1 == 0 ? 0 : 2)}x ${d.insumoUtilizadoSku ?? d.insumoUtilizadoId}'
+                    : (!d.esServicio ? ' -> Reintegra ${d.cantidad.toStringAsFixed(d.cantidad % 1 == 0 ? 0 : 2)} pzs' : '');
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text('• ${d.nombre}$insumoNote', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                );
+              }),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Volver')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB71C1C), foregroundColor: Colors.white),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Sí, Cancelar Ticket'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true || !mounted) return;
+
+    final isAuthorized = await AdminAuthDialog.requestAdminAccess(context, widget.authController);
+    if (!isAuthorized || !mounted) return;
+
+    try {
+      await _salesRepo.cancelSale(sale.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Ticket cancelado y existencias/insumos reintegrados al inventario.'),
+            backgroundColor: Color(0xFF2E7D32),
+          ),
+        );
+        _loadSales();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cancelar ticket: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   Future<void> _openPartialRefundDialog(SaleRecord sale, List<SaleDetailItem> details) async {
     final Map<String, double> refundQuantities = {};
     for (final it in details) {
@@ -114,13 +178,13 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
           return AlertDialog(
             title: Text('Devolución de Artículos - Folio: ${sale.folioTicket}'),
             content: SizedBox(
-              width: 550,
-              height: 420,
+              width: 560,
+              height: 430,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Selecciona las unidades a devolver para reintegrar automáticamente a inventario:',
+                    'Selecciona las unidades a devolver para reintegrar automáticamente productos o insumos de servicios al inventario:',
                     style: TextStyle(fontSize: 12, color: Colors.black87),
                   ),
                   const SizedBox(height: 8),
@@ -141,7 +205,18 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                    Text('Comprado: ${item.cantidad} | P.U: \$${item.precioHistorico.toStringAsFixed(2)}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                    Text(
+                                      'Comprado: ${item.cantidad} | P.U: \$${item.precioHistorico.toStringAsFixed(2)}',
+                                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                    ),
+                                    if (item.hasDynamicInsumo)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 2),
+                                        child: Text(
+                                          '🔑 Insumo vinculado: ${item.cantidadInsumoConsumida.toStringAsFixed(item.cantidadInsumoConsumida % 1 == 0 ? 0 : 2)}x ${item.insumoUtilizadoSku ?? item.insumoUtilizadoId} (se reintegrará a stock)',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF006064)),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),
@@ -196,7 +271,10 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('Total a Reembolsar al Cliente:', style: TextStyle(fontWeight: FontWeight.bold)),
-                        Text('\$${totalADevolver.toStringAsFixed(2)}', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red.shade800)),
+                        Text(
+                          '\$${totalADevolver.toStringAsFixed(2)}',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red.shade800),
+                        ),
                       ],
                     ),
                   ),
@@ -241,7 +319,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Devolución procesada. Stock reintegrado al inventario con éxito.'),
+              content: Text('Devolución procesada. Stock e insumos reintegrados al inventario con éxito.'),
               backgroundColor: Color(0xFF2E7D32),
             ),
           );
@@ -249,7 +327,9 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en devolución: $e'), backgroundColor: Colors.red));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error en devolución: $e'), backgroundColor: Colors.red),
+          );
         }
       }
     }
@@ -272,18 +352,21 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: Colors.red.shade100, borderRadius: BorderRadius.circular(4)),
                 child: const Text('CANCELADO', style: TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.bold)),
-              )
+              ),
           ],
         ),
         content: SizedBox(
-          width: 520,
+          width: 540,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text('Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.fechaVenta.toLocal())}', style: const TextStyle(color: Colors.grey)),
+              Text(
+                'Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.fechaVenta.toLocal())}',
+                style: const TextStyle(color: Colors.grey),
+              ),
               const Divider(),
-              Expanded(
+              Flexible(
                 child: ListView.builder(
                   shrinkWrap: true,
                   itemCount: details.length,
@@ -292,15 +375,29 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                     return ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      title: Text(item.nombre),
-                      subtitle: Text('${item.cantidad} x \$${item.precioHistorico.toStringAsFixed(2)}'),
+                      title: Text(item.nombre, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('${item.cantidad} x \$${item.precioHistorico.toStringAsFixed(2)}'),
+                          if (item.hasDynamicInsumo)
+                            Text(
+                              '🔑 Insumo descontado: ${item.cantidadInsumoConsumida.toStringAsFixed(item.cantidadInsumoConsumida % 1 == 0 ? 0 : 2)}x ${item.insumoUtilizadoSku ?? item.insumoUtilizadoId}',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF006064), fontWeight: FontWeight.w600),
+                            ),
+                        ],
+                      ),
                       trailing: Text('\$${item.totalLinea.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                     );
                   },
                 ),
               ),
               const Divider(),
-              Text('TOTAL: \$${sale.total.toStringAsFixed(2)}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              Text(
+                'TOTAL: \$${sale.total.toStringAsFixed(2)}',
+                textAlign: TextAlign.right,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
             ],
           ),
         ),
@@ -314,7 +411,16 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
               _reprintTicket(sale, details);
             },
           ),
-          if (sale.estatus != 'cancelado')
+          if (sale.estatus != 'cancelado') ...[
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFB71C1C), side: const BorderSide(color: Color(0xFFB71C1C))),
+              icon: const Icon(Icons.cancel_outlined),
+              label: const Text('Cancelar Ticket'),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _confirmCancelFullTicket(sale, details);
+              },
+            ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD32F2F), foregroundColor: Colors.white),
               icon: const Icon(Icons.undo),
@@ -324,6 +430,7 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                 _openPartialRefundDialog(sale, details);
               },
             ),
+          ],
         ],
       ),
     );
@@ -362,18 +469,31 @@ class _SalesHistoryScreenState extends State<SalesHistoryScreen> {
                     itemBuilder: (context, index) {
                       final sale = _sales[index];
                       final isCanceled = sale.estatus == 'cancelado';
-                      
+
                       return ListTile(
                         tileColor: isCanceled ? Colors.red.shade50 : Colors.white,
                         leading: CircleAvatar(
                           backgroundColor: isCanceled ? Colors.red.shade100 : const Color(0xFFE3F2FD),
-                          child: Icon(isCanceled ? Icons.block : Icons.check_circle, color: isCanceled ? Colors.red : const Color(0xFF1F4E79)),
+                          child: Icon(
+                            isCanceled ? Icons.block : Icons.check_circle,
+                            color: isCanceled ? Colors.red : const Color(0xFF1F4E79),
+                          ),
                         ),
-                        title: Text(sale.folioTicket, style: TextStyle(fontWeight: FontWeight.bold, decoration: isCanceled ? TextDecoration.lineThrough : null)),
+                        title: Text(
+                          sale.folioTicket,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            decoration: isCanceled ? TextDecoration.lineThrough : null,
+                          ),
+                        ),
                         subtitle: Text(DateFormat('dd MMM yyyy, HH:mm').format(sale.fechaVenta.toLocal())),
                         trailing: Text(
                           '\$${sale.total.toStringAsFixed(2)}',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isCanceled ? Colors.red : Colors.green.shade800),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: isCanceled ? Colors.red : Colors.green.shade800,
+                          ),
                         ),
                         onTap: () => _showTicketDetails(sale),
                       );
