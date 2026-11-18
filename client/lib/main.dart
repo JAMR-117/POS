@@ -1,3 +1,4 @@
+import 'presentation/screens/login_screen.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -99,16 +100,26 @@ class PosApp extends StatelessWidget {
         colorSchemeSeed: const Color(0xFF1F4E79),
         scaffoldBackgroundColor: const Color(0xFFECEFF1),
       ),
-      home: PosScreen(
-        cartController: cartController,
-        syncWorker: syncWorker,
-        alertsController: alertsController,
-        shiftController: shiftController,
-        inventoryApiClient: inventoryApiClient,
-        printerService: printerService,
-        authController: authController,
-        usuarioId: 'cajero-principal',
-        nombreNegocio: 'MI TIENDA POS',
+      home: ListenableBuilder(
+        listenable: authController,
+        builder: (context, _) {
+          if (!authController.isAuthenticated) {
+            return LoginScreen(
+              authController: authController,
+            );
+          }
+          return PosScreen(
+            cartController: cartController,
+            syncWorker: syncWorker,
+            alertsController: alertsController,
+            shiftController: shiftController,
+            inventoryApiClient: inventoryApiClient,
+            printerService: printerService,
+            authController: authController,
+            usuarioId: authController.currentUser?.nombre ?? 'Cajero Principal',
+            nombreNegocio: 'CERRAJERÍA Y ELECTRÓNICA AUTOMOTRIZ',
+          );
+        },
       ),
     );
   }

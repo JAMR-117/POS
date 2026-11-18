@@ -21,7 +21,7 @@ class UserModel {
       nombre: map['nombre'] as String,
       pinAcceso: map['pin_acceso'] as String,
       rol: map['rol'] as String,
-      activo: (map['activo'] as int) == 1,
+      activo: map['activo'] == null || (map['activo'] as int) == 1,
     );
   }
 }
@@ -37,7 +37,7 @@ class UserRepository {
     final db = await _dbHelper.database;
     final results = await db.query(
       'usuarios',
-      where: 'pin_acceso = ? AND activo = 1',
+      where: 'pin_acceso = ? AND COALESCE(activo, 1) = 1',
       whereArgs: [pin],
       limit: 1,
     );
@@ -46,5 +46,20 @@ class UserRepository {
       return UserModel.fromMap(results.first);
     }
     return null;
+  }
+
+  /// Retorna todos los usuarios/cajeros registrados y activos
+  Future<List<UserModel>> getActiveUsers() async {
+    try {
+      final db = await _dbHelper.database;
+      final results = await db.query(
+        'usuarios',
+        where: 'COALESCE(activo, 1) = 1',
+        orderBy: 'nombre ASC',
+      );
+      return results.map((r) => UserModel.fromMap(r)).toList();
+    } catch (_) {
+      return [];
+    }
   }
 }

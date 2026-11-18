@@ -31,12 +31,16 @@ class InventoryScreen extends StatefulWidget {
   final InventoryApiClient apiClient;
   final AuthController authController;
   final String? tiendaId;
+  final int initialTabIndex;
+  final bool showAppBar;
 
   const InventoryScreen({
     super.key,
     required this.apiClient,
     required this.authController,
     this.tiendaId,
+    this.initialTabIndex = 0,
+    this.showAppBar = true,
   });
 
   @override
@@ -103,7 +107,11 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(
+      length: 4,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 3),
+    );
     _tabController.addListener(() {
       if (_tabController.index == 3) {
         _loadKardex();
@@ -115,6 +123,14 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     _loadLocations();
     _loadKardex();
     _triggerBackgroundSync();
+  }
+
+  @override
+  void didUpdateWidget(covariant InventoryScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.initialTabIndex != widget.initialTabIndex) {
+      _tabController.animateTo(widget.initialTabIndex.clamp(0, 3));
+    }
   }
 
   @override
@@ -274,7 +290,8 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFECEFF1),
-      appBar: AppBar(
+      appBar: widget.showAppBar
+          ? AppBar(
         backgroundColor: const Color(0xFF1F4E79),
         foregroundColor: Colors.white,
         title: const Row(
@@ -340,21 +357,87 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
           ),
           const SizedBox(width: 12),
         ],
-      ),
-      body: TabBarView(
-        controller: _tabController,
+      )
+          : null,
+      body: Column(
         children: [
-          // Pestaña 1: Catálogo Maestro con Master-Detail
-          _buildCatalogMasterTab(),
-
-          // Pestaña 2: Recepción de Mercancía / Compras
-          _buildGoodsReceiptTab(),
-
-          // Pestaña 3: Conteo Físico / Auditoría por Gaveta
-          _buildAuditByDrawerTab(),
-
-          // Pestaña 4: Kardex / Historial de Movimientos
-          _buildKardexView(),
+          if (!widget.showAppBar)
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 4.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TabBar(
+                      controller: _tabController,
+                      labelColor: const Color(0xFF1F4E79),
+                      unselectedLabelColor: Colors.black54,
+                      indicatorColor: const Color(0xFF1F4E79),
+                      indicatorWeight: 3,
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      tabs: const [
+                        Tab(icon: Icon(Icons.inventory_2, size: 18), text: 'Catálogo Maestro'),
+                        Tab(icon: Icon(Icons.local_shipping, size: 18), text: 'Recepción / Compras'),
+                        Tab(icon: Icon(Icons.checklist_rtl, size: 18), text: 'Auditoría por Gaveta'),
+                        Tab(icon: Icon(Icons.history_edu, size: 18), text: 'Kardex de Movimientos'),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.refresh, color: Color(0xFF1F4E79)),
+                    tooltip: 'Recargar catálogo',
+                    onPressed: () {
+                      _loadLocalCatalog();
+                      _loadLocations();
+                      _loadKardex();
+                      _triggerBackgroundSync();
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.file_upload_outlined, color: Color(0xFF1F4E79)),
+                    tooltip: 'Importar Catálogo Masivo (CSV)',
+                    onPressed: () async {
+                      CatalogImportDialog.show(context);
+                      _loadLocalCatalog();
+                      _loadLocations();
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('NUEVO ARTÍCULO', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    onPressed: () async {
+                      final created = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => ProductFormScreen(repository: _productRepo),
+                        ),
+                      );
+                      if (created == true) {
+                        _loadLocalCatalog();
+                        _loadLocations();
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildCatalogMasterTab(),
+                _buildGoodsReceiptTab(),
+                _buildAuditByDrawerTab(),
+                _buildKardexView(),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -962,6 +1045,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   }
 
   Future<void> _openQuickStockEntryDialog(Product p) async {
+    if (p.esServicio) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Los servicios no manejan inventario físico ni recepción de stock.')),
+      );
+      return;
+    }
     final qtyCtrl = TextEditingController(text: '10');
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1076,12 +1165,19 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                         if (textEditingValue.text.isEmpty) return const Iterable<Product>.empty();
                         final q = textEditingValue.text.toLowerCase();
                         return _allProductsCache.where((p) =>
-                            p.nombre.toLowerCase().contains(q) ||
+                            !p.esServicio &&
+                            (p.nombre.toLowerCase().contains(q) ||
                             p.descripcion.toLowerCase().contains(q) ||
                             (p.sku?.toLowerCase().contains(q) ?? false) ||
-                            (p.codigoBarras?.toLowerCase().contains(q) ?? false));
+                            (p.codigoBarras?.toLowerCase().contains(q) ?? false)));
                       },
                       onSelected: (Product selected) {
+                        if (selected.esServicio) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('No se puede recibir mercancía física de un servicio.')),
+                          );
+                          return;
+                        }
                         final idx = _receptionList.indexWhere((r) => r.product.id == selected.id);
                         setState(() {
                           if (idx != -1) {

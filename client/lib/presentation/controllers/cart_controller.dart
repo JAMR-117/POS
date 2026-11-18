@@ -3,6 +3,31 @@ import 'package:flutter/foundation.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/sales_repository.dart';
 
+/// Calcula el total redondeado en efectivo según los 3 rangos comerciales estrictos:
+/// 1. centavos == 0.00 => enteroBase
+/// 2. centavos <= 0.10 => enteroBase (baja a la cantidad cerrada entera)
+/// 3. centavos > 0.10 && centavos <= 0.60 => enteroBase + 0.50 (se cierra en 50 centavos)
+/// 4. centavos > 0.60 => enteroBase + 1.00 (sube a la cantidad cerrada entera superior)
+double calcularRedondeoEfectivo(double totalExacto) {
+  if (totalExacto <= 0) return 0.0;
+  final enteroBase = totalExacto.floorToDouble();
+  final centavos = double.parse((totalExacto - enteroBase).toStringAsFixed(2));
+
+  if (centavos == 0.00 || centavos <= 0.10) {
+    return enteroBase;
+  } else if (centavos <= 0.60) {
+    return enteroBase + 0.50;
+  } else {
+    return enteroBase + 1.00;
+  }
+}
+
+/// Retorna el ajuste por redondeo: totalRedondeado - totalExacto
+double calcularAjusteRedondeo(double totalExacto) {
+  final totalRedondeado = calcularRedondeoEfectivo(totalExacto);
+  return double.parse((totalRedondeado - totalExacto).toStringAsFixed(2));
+}
+
 /// Gestor reactivo de estado para el punto de cobro (POS Especializado en Cerrajería)
 class CartController extends ChangeNotifier {
   final SalesRepository _salesRepository;
@@ -33,6 +58,10 @@ class CartController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
   bool get isEmpty => _items.isEmpty;
+  bool get isNotEmpty => _items.isNotEmpty;
+  void clear() => clearCart();
+  String get currentClientId => _selectedClientId;
+  String get currentClientNombre => _selectedClientName;
   String get selectedClientId => _selectedClientId;
   String get selectedClientName => _selectedClientName;
   String get selectedClientTier => _selectedClientTier;
@@ -90,6 +119,9 @@ class CartController extends ChangeNotifier {
     _selectedClientId = id;
     _selectedClientName = name;
     _selectedClientTier = tier;
+    if (_items.isNotEmpty) {
+      applyGlobalPriceAndDiscount(tierLabel: tier, discountPercent: 0.0);
+    }
     notifyListeners();
   }
 
@@ -115,8 +147,41 @@ class CartController extends ChangeNotifier {
   double get impuestosTotal => 0.0;
 
   // ---------------------------------------------------------------------------
-  // LÓGICA DE PRECIOS MULTI-NIVEL Y MAYOREO
+  // CONFIGURACIÓN Y LÓGICA DE MAYOREO AUTOMÁTICO
   // ---------------------------------------------------------------------------
+
+  bool mayoreoAutoEnabled = true;
+  double mayoreoUmbralGlobal = 5.0;
+
+void _recalculateApplicablePrices() {
+    for (int i = 0; i < _items.length; i++) {
+      final current = _items[i];
+      final prod = _productCache[current.productoId];
+      if (prod != null && current.etiquetaPrecio != 'Manual') {
+        final applicablePrice = _determineApplicablePrice(prod, current.cantidad, targetTier: _selectedClientTier);
+        final tierLabel = _determineApplicableTierLabel(prod, current.cantidad, targetTier: _selectedClientTier);
+        final totalLinea = _calculateLineTotal(current.cantidad, applicablePrice, current.descuentoLinea);
+        _items[i] = current.copyWith(
+          precioHistorico: applicablePrice,
+          etiquetaPrecio: tierLabel,
+          totalLinea: _roundToDecimals(totalLinea, 2),
+        );
+      }
+    }
+  }
+
+  void setMayoreoConfig({required bool autoEnabled, required double umbral}) {
+    mayoreoAutoEnabled = autoEnabled;
+    mayoreoUmbralGlobal = umbral;
+    _recalculateApplicablePrices();
+    notifyListeners();
+  }
+
+  void toggleMayoreoAuto([bool? value]) {
+    mayoreoAutoEnabled = value ?? !mayoreoAutoEnabled;
+    _recalculateApplicablePrices();
+    notifyListeners();
+  }
 
   double determineServiceSuggestedPrice(Product service, {String? targetTier}) {
     final tier = targetTier ?? _selectedClientTier;
@@ -135,8 +200,13 @@ class CartController extends ChangeNotifier {
   double _determineApplicablePrice(Product product, double currentQuantity, {String? targetTier}) {
     final tier = targetTier ?? _selectedClientTier;
 
-    if (product.hasWholesalePrice && currentQuantity >= product.cantidadMayoreo!) {
-      return product.precioMayoreo!;
+    if (mayoreoAutoEnabled) {
+      final double umbral = (product.cantidadMayoreo != null && product.cantidadMayoreo! > 0)
+          ? product.cantidadMayoreo!
+          : mayoreoUmbralGlobal;
+      if (product.precioMayoreo != null && product.precioMayoreo! > 0 && currentQuantity >= umbral) {
+        return product.precioMayoreo!;
+      }
     }
 
     if (tier == 'Cerrajero' && product.precioCerrajero != null && product.precioCerrajero! > 0) {
@@ -157,8 +227,13 @@ class CartController extends ChangeNotifier {
   String _determineApplicableTierLabel(Product product, double currentQuantity, {String? targetTier}) {
     final tier = targetTier ?? _selectedClientTier;
 
-    if (product.hasWholesalePrice && currentQuantity >= product.cantidadMayoreo!) {
-      return 'Mayoreo';
+    if (mayoreoAutoEnabled) {
+      final double umbral = (product.cantidadMayoreo != null && product.cantidadMayoreo! > 0)
+          ? product.cantidadMayoreo!
+          : mayoreoUmbralGlobal;
+      if (product.precioMayoreo != null && product.precioMayoreo! > 0 && currentQuantity >= umbral) {
+        return 'Mayoreo';
+      }
     }
     if (tier == 'Cerrajero' && product.precioCerrajero != null && product.precioCerrajero! > 0) {
       return 'Cerrajero';
@@ -414,6 +489,151 @@ class CartController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Aplica nivel de precio y descuento porcentual a una partida individual del ticket
+  void applyItemPriceAndDiscount({
+    required String detailItemId,
+    required double newUnitPrice,
+    required String tierLabel,
+    required double discountPercent,
+    double? manualFinalPrice,
+    double? newInsumoConsumida,
+  }) {
+    final index = _items.indexWhere((item) => item.id == detailItemId);
+    if (index == -1) return;
+
+    final current = _items[index];
+
+    double effectiveUnitPrice = newUnitPrice;
+    double calculatedLineDiscount = 0.0;
+
+    if (manualFinalPrice != null && manualFinalPrice >= 0) {
+      if (manualFinalPrice <= newUnitPrice && newUnitPrice > 0) {
+        final unitDiscount = newUnitPrice - manualFinalPrice;
+        calculatedLineDiscount = unitDiscount * current.cantidad;
+      } else {
+        effectiveUnitPrice = manualFinalPrice;
+        calculatedLineDiscount = 0.0;
+      }
+    } else if (discountPercent > 0) {
+      final safePercent = discountPercent.clamp(0.0, 100.0);
+      calculatedLineDiscount = (effectiveUnitPrice * current.cantidad) * (safePercent / 100.0);
+    }
+
+    final double maxDiscount = current.cantidad * effectiveUnitPrice;
+    final double safeDiscount = calculatedLineDiscount.clamp(0.0, maxDiscount);
+    final double totalLinea = _calculateLineTotal(current.cantidad, effectiveUnitPrice, safeDiscount);
+
+    double newInsumoQty = current.cantidadInsumoConsumida;
+    if (newInsumoConsumida != null && newInsumoConsumida >= 0) {
+      newInsumoQty = newInsumoConsumida;
+    }
+
+    double newCostoHistorico = current.costoHistorico;
+    if (current.hasDynamicInsumo && current.insumoUtilizadoId != null) {
+      final insumoProd = _productCache[current.insumoUtilizadoId!];
+      if (insumoProd != null && current.cantidad > 0) {
+        newCostoHistorico = (insumoProd.precioCompra * newInsumoQty) / current.cantidad;
+      }
+    }
+
+    String finalLabel = tierLabel;
+    if (discountPercent > 0) {
+      final formattedPct = discountPercent % 1 == 0
+          ? discountPercent.toStringAsFixed(0)
+          : discountPercent.toStringAsFixed(1);
+      finalLabel = '$tierLabel -$formattedPct%';
+    } else if (manualFinalPrice != null && effectiveUnitPrice != current.precioHistorico) {
+      finalLabel = 'Manual';
+    }
+
+    _items[index] = current.copyWith(
+      precioHistorico: _roundToDecimals(effectiveUnitPrice, 2),
+      descuentoLinea: _roundToDecimals(safeDiscount, 2),
+      etiquetaPrecio: finalLabel,
+      totalLinea: _roundToDecimals(totalLinea, 2),
+      cantidadInsumoConsumida: _roundToDecimals(newInsumoQty, 3),
+      costoHistorico: newCostoHistorico,
+    );
+
+    notifyListeners();
+  }
+
+  /// Aplica nivel de precio y descuento porcentual de forma masiva a todo el ticket
+  void applyGlobalPriceAndDiscount({
+    required String tierLabel,
+    double discountPercent = 0.0,
+  }) {
+    _currentGlobalTier = tierLabel;
+
+    for (int i = 0; i < _items.length; i++) {
+      final current = _items[i];
+      if (current.productoId == 'ART-COMUN') continue;
+
+      final prod = _productCache[current.productoId];
+      double applicablePrice = current.precioHistorico;
+      String appliedLabel = current.etiquetaPrecio;
+
+      if (prod != null) {
+        if (tierLabel == 'Cerrajero') {
+          if (prod.precioCerrajero != null && prod.precioCerrajero! > 0) {
+            applicablePrice = prod.precioCerrajero!;
+            appliedLabel = 'Cerrajero';
+          } else {
+            applicablePrice = prod.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else if (tierLabel == 'Taller') {
+          if (prod.precioTaller != null && prod.precioTaller! > 0) {
+            applicablePrice = prod.precioTaller!;
+            appliedLabel = 'Taller';
+          } else {
+            applicablePrice = prod.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else if (tierLabel == 'Mayoreo') {
+          if (prod.precioMayoreo != null && prod.precioMayoreo! > 0) {
+            applicablePrice = prod.precioMayoreo!;
+            appliedLabel = 'Mayoreo';
+          } else {
+            applicablePrice = prod.precioVenta;
+            appliedLabel = 'Público';
+          }
+        } else {
+          applicablePrice = prod.precioVenta;
+          appliedLabel = 'Público';
+        }
+      }
+
+      double safeDiscount = 0.0;
+      if (discountPercent > 0) {
+        final safePercent = discountPercent.clamp(0.0, 100.0);
+        safeDiscount = (applicablePrice * current.cantidad) * (safePercent / 100.0);
+        final formattedPct = discountPercent % 1 == 0
+            ? discountPercent.toStringAsFixed(0)
+            : discountPercent.toStringAsFixed(1);
+        appliedLabel = '$appliedLabel -$formattedPct%';
+      }
+
+      final double maxDiscount = current.cantidad * applicablePrice;
+      safeDiscount = safeDiscount.clamp(0.0, maxDiscount);
+
+      final double totalLinea = _calculateLineTotal(
+        current.cantidad,
+        applicablePrice,
+        safeDiscount,
+      );
+
+      _items[i] = current.copyWith(
+        precioHistorico: _roundToDecimals(applicablePrice, 2),
+        descuentoLinea: _roundToDecimals(safeDiscount, 2),
+        etiquetaPrecio: appliedLabel,
+        totalLinea: _roundToDecimals(totalLinea, 2),
+      );
+    }
+
+    notifyListeners();
+  }
+
   /// Actualiza la cantidad exacta y escala proporcionalmente el insumo consumido si aplica
   void updateQuantity(String detailItemId, double newQuantity, {Product? referenceProduct}) {
     if (newQuantity <= 0) {
@@ -587,12 +807,14 @@ class CartController extends ChangeNotifier {
     required String corteCajaId,
     String? folioTicket,
     double? totalRecibidoEfectivo,
+    double ajusteRedondeo = 0.0,
+    String? notasTicket,
   }) async {
     if (_items.isEmpty) {
       throw Exception('El carrito está vacío');
     }
 
-    final double totalVenta = total;
+    final double totalVenta = _roundToDecimals(total + ajusteRedondeo, 2);
     final double totalPagado = totalRecibidoEfectivo != null
         ? (pagos.where((p) => p.metodo != 'efectivo').fold(0.0, (acc, p) => acc + p.monto) + totalRecibidoEfectivo)
         : pagos.fold(0.0, (acc, p) => acc + p.monto);
@@ -616,9 +838,11 @@ class CartController extends ChangeNotifier {
         descuentoTotal: descuentoTotal,
         impuestosTotal: impuestosTotal,
         total: totalVenta,
+        ajusteRedondeo: ajusteRedondeo,
         pagosDesglose: pagos,
         items: List.from(_items),
         fechaVenta: DateTime.now().toUtc(),
+        notasTicket: notasTicket,
       );
 
       await _salesRepository.processSaleTransaction(request);

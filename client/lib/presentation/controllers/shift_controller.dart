@@ -27,7 +27,9 @@ class ShiftController extends ChangeNotifier {
       if (_currentShift != null) {
         _currentSummary = await _shiftRepository.getShiftSummary(_currentShift!.id);
       } else {
-        _currentSummary = null;
+        // Fallback robusto: Administrador o sin turno individual abierto consulta consolidado del dia
+        _currentSummary = await _shiftRepository.getDailyConsolidatedSummary();
+        _errorMessage = null;
       }
       _errorMessage = null;
     } catch (e) {
@@ -57,15 +59,27 @@ class ShiftController extends ChangeNotifier {
 
   /// Refresca las métricas agregadas del turno activo (Corte X)
   Future<ShiftSummary?> loadShiftSummary() async {
-    if (!hasActiveShift) return null;
+    _setLoading(true);
     try {
-      _currentSummary = await _shiftRepository.generateCorteX(activeShiftId);
+      if (!hasActiveShift) {
+        _currentShift = await _shiftRepository.getActiveShift();
+      }
+      if (hasActiveShift) {
+        _currentSummary = await _shiftRepository.generateCorteX(activeShiftId);
+        _errorMessage = null;
+      } else {
+        // Fallback robusto: Administrador o sin turno individual abierto consulta consolidado del dia
+        _currentSummary = await _shiftRepository.getDailyConsolidatedSummary();
+        _errorMessage = null;
+      }
       notifyListeners();
       return _currentSummary;
     } catch (e) {
       _errorMessage = e.toString();
       notifyListeners();
       return null;
+    } finally {
+      _setLoading(false);
     }
   }
 

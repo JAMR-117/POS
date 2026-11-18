@@ -17,19 +17,31 @@ class ClientRepository {
     return List.generate(16, (i) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
   }
 
-  /// Búsqueda y filtrado de clientes activos
+  /// Búsqueda y filtrado de clientes activos tolerante a nulos
   Future<List<Cliente>> getClients([String query = '']) async {
-    final db = await _dbHelper.database;
-    final cleanQuery = query.trim();
-    
-    final results = await db.query(
-      'clientes',
-      where: cleanQuery.isEmpty ? 'activo = 1' : 'activo = 1 AND (nombre LIKE ? OR rfc_o_dni LIKE ? OR telefono LIKE ?)',
-      whereArgs: cleanQuery.isEmpty ? null : ['%$cleanQuery%', '%$cleanQuery%', '%$cleanQuery%'],
-      orderBy: 'nombre ASC',
-      limit: 50,
-    );
-    return results.map((r) => Cliente.fromMap(r)).toList();
+    try {
+      final db = await _dbHelper.database;
+      final cleanQuery = query.trim();
+      
+      final results = await db.query(
+        'clientes',
+        where: cleanQuery.isEmpty
+            ? 'COALESCE(activo, 1) = 1'
+            : 'COALESCE(activo, 1) = 1 AND (nombre LIKE ? OR rfc_o_dni LIKE ? OR telefono LIKE ?)',
+        whereArgs: cleanQuery.isEmpty ? null : ['%$cleanQuery%', '%$cleanQuery%', '%$cleanQuery%'],
+        orderBy: 'nombre ASC',
+        limit: 100,
+      );
+      final List<Cliente> clients = [];
+      for (final r in results) {
+        try {
+          clients.add(Cliente.fromMap(r));
+        } catch (_) {}
+      }
+      return clients;
+    } catch (_) {
+      return [];
+    }
   }
 
   /// Guardar o actualizar cliente completo con campos CFDI / Fiscales
@@ -216,6 +228,17 @@ class ClientRepository {
     final isoNow = DateTime.now().toUtc().toIso8601String();
 
     await db.transaction((txn) async {
+      // 0. Validar deuda actual del cliente para impedir sobrepago
+      final clientRows = await txn.query('clientes', where: 'id = ?', whereArgs: [clienteId]);
+      if (clientRows.isEmpty) throw Exception('Cliente no encontrado para registro de abono.');
+      final double saldoActual = (clientRows.first['saldo_deudor'] as num?)?.toDouble() ?? 0.0;
+      if (monto <= 0) {
+        throw Exception('El monto del abono debe ser mayor a 0.');
+      }
+      if (monto > saldoActual + 0.001) {
+        throw Exception('El abono (\$${monto.toStringAsFixed(2)}) no puede superar la deuda actual de \$${saldoActual.toStringAsFixed(2)}.');
+      }
+
       // 1. Insertar abono
       await txn.insert('abonos_credito', {
         'id': id,

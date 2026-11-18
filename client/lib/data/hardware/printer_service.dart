@@ -216,6 +216,34 @@ class PrinterService {
     }
   }
 
+  /// Consulta el puente local en Go para listar impresoras instaladas en Windows
+  Future<List<String>> getDetectedPrinters() async {
+    try {
+      final res = await http.get(Uri.parse('${_config.backendUrl}/api/v1/printers')).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final list = (data['printers'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+        return list;
+      }
+    } catch (e) {
+      debugPrint('[PrinterService] Error consultando /api/v1/printers: $e');
+    }
+    return [];
+  }
+
+  /// Consulta el inventario de hardware POS (impresoras y puertos serie)
+  Future<Map<String, dynamic>> getDetectedDevices() async {
+    try {
+      final res = await http.get(Uri.parse('${_config.backendUrl}/api/v1/devices')).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('[PrinterService] Error consultando /api/v1/devices: $e');
+    }
+    return {'success': false, 'printers': <String>[], 'serial_ports': <String>[]};
+  }
+
   /// Imprime una página de prueba con formato y corte de papel
   Future<PrintResult> printTestPage() async {
     final testData = TicketPrintData(

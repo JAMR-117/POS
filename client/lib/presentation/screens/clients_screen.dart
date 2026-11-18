@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../data/local/business_config.dart';
 import '../../data/local/models.dart';
 import '../../data/repositories/client_repository.dart';
 import '../controllers/shift_controller.dart';
 
 class ClientsScreen extends StatefulWidget {
   final ShiftController shiftController;
+  final bool showAppBar;
 
-  const ClientsScreen({super.key, required this.shiftController});
+  const ClientsScreen({
+    super.key,
+    required this.shiftController,
+    this.showAppBar = true,
+  });
 
   @override
   State<ClientsScreen> createState() => _ClientsScreenState();
@@ -16,6 +22,7 @@ class ClientsScreen extends StatefulWidget {
 class _ClientsScreenState extends State<ClientsScreen> {
   final ClientRepository _repo = ClientRepository();
   List<Cliente> _clients = [];
+  Cliente? _selectedClient;
   bool _isLoading = true;
   bool _soloDeudores = false;
   String _currentQuery = '';
@@ -144,11 +151,34 @@ class _ClientsScreenState extends State<ClientsScreen> {
                       decoration: const InputDecoration(labelText: 'Dirección Completa', border: OutlineInputBorder()),
                     ),
                     const SizedBox(height: 10),
-                    TextField(
-                      controller: limitCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'Límite de Crédito Autorizado (\$)', border: OutlineInputBorder()),
-                    ),
+                    if (BusinessConfig.current.creditoClientesHabilitado) ...[
+                      TextField(
+                        controller: limitCtrl,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        decoration: const InputDecoration(labelText: 'Límite de Crédito Autorizado (\$)', border: OutlineInputBorder()),
+                      ),
+                    ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF8E1),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFFFFE082)),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.info_outline, size: 16, color: Color(0xFF795548)),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Crédito deshabilitado globalmente en Configuración.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF795548)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -217,6 +247,12 @@ class _ClientsScreenState extends State<ClientsScreen> {
   }
 
   void _showAbonoDialog(Cliente client) {
+    if (client.saldoDeudor <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('El cliente "${client.nombre}" no tiene saldo deudor pendiente.')),
+      );
+      return;
+    }
     final TextEditingController montoController = TextEditingController();
     bool isProcessing = false;
 
@@ -225,34 +261,82 @@ class _ClientsScreenState extends State<ClientsScreen> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
+          final currentMonto = double.tryParse(montoController.text) ?? 0.0;
+          String? validationError;
+          if (montoController.text.trim().isNotEmpty) {
+            if (currentMonto <= 0) {
+              validationError = 'El abono debe ser mayor a \$0.00';
+            } else if (currentMonto > client.saldoDeudor + 0.001) {
+              validationError = 'El abono no puede superar la deuda actual de \$${client.saldoDeudor.toStringAsFixed(2)}';
+            }
+          }
+
+          final bool canConfirm = currentMonto > 0 && currentMonto <= client.saldoDeudor + 0.001 && !isProcessing;
+
           return AlertDialog(
             insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-            title: Text('Abonar a cuenta de ${client.nombre}'),
-            content: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 420,
-                maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
-              ),
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Deuda Pendiente: \$${client.saldoDeudor.toStringAsFixed(2)}', 
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.red)),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: montoController,
-                      autofocus: true,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
-                      decoration: const InputDecoration(
-                        labelText: 'Monto a recibir (\$)',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.attach_money),
-                      ),
+            title: Row(
+              children: [
+                const Icon(Icons.payment, color: Color(0xFF2E7D32)),
+                const SizedBox(width: 8),
+                Expanded(child: Text('Abonar a cuenta: ${client.nombre}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17))),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.red.shade200),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Deuda actual:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+                        Text('\$${client.saldoDeudor.toStringAsFixed(2)}', 
+                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFF1F4E79),
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      ),
+                      icon: const Icon(Icons.check_circle_outline, size: 16),
+                      label: Text('Liquidar total (\$${client.saldoDeudor.toStringAsFixed(2)})', 
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      onPressed: () {
+                        setModalState(() {
+                          montoController.text = client.saldoDeudor.toStringAsFixed(2);
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: montoController,
+                    autofocus: true,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))],
+                    decoration: InputDecoration(
+                      labelText: 'Monto a recibir (\$)',
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.attach_money),
+                      errorText: validationError,
+                    ),
+                    onChanged: (_) => setModalState(() {}),
+                  ),
+                ],
               ),
             ),
             actions: [
@@ -260,11 +344,18 @@ class _ClientsScreenState extends State<ClientsScreen> {
                 onPressed: isProcessing ? null : () => Navigator.pop(ctx),
                 child: const Text('Cancelar'),
               ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32), foregroundColor: Colors.white),
-                onPressed: isProcessing ? null : () async {
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canConfirm ? const Color(0xFF2E7D32) : Colors.grey,
+                  foregroundColor: Colors.white,
+                ),
+                icon: isProcessing 
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.check, size: 18),
+                label: const Text('REGISTRAR ABONO'),
+                onPressed: canConfirm ? () async {
                   final monto = double.tryParse(montoController.text) ?? 0.0;
-                  if (monto <= 0) return;
+                  if (monto <= 0 || monto > client.saldoDeudor + 0.001) return;
 
                   setModalState(() => isProcessing = true);
                   final messenger = ScaffoldMessenger.of(context);
@@ -288,10 +379,7 @@ class _ClientsScreenState extends State<ClientsScreen> {
                       messenger.showSnackBar(SnackBar(content: Text('Error: $e')));
                     }
                   }
-                },
-                child: isProcessing 
-                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : const Text('REGISTRAR ABONO'),
+                } : null,
               ),
             ],
           );
@@ -300,23 +388,150 @@ class _ClientsScreenState extends State<ClientsScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Clientes y Cuentas por Cobrar'),
-        backgroundColor: const Color(0xFF1F4E79),
-        foregroundColor: Colors.white,
+  void _confirmDeleteClient(Cliente client) {
+    if (client.id == 'PUBLICO-GRAL') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se puede eliminar el cliente Público en General.')),
+      );
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Cliente'),
+        content: Text('¿Está seguro de eliminar al cliente "${client.nombre}"?'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.person_add),
-            tooltip: 'Nuevo Cliente',
-            onPressed: () => _showClientFormDialog(),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              final nav = Navigator.of(ctx);
+              await _repo.deleteClient(client.id);
+              if (mounted) {
+                nav.pop();
+                setState(() => _selectedClient = null);
+                _loadClients(_currentQuery);
+              }
+            },
+            child: const Text('Eliminar'),
           ),
         ],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: widget.showAppBar
+          ? AppBar(
+              title: const Text('Clientes y Cuentas por Cobrar'),
+              backgroundColor: const Color(0xFF1F4E79),
+              foregroundColor: Colors.white,
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.person_add),
+                  tooltip: 'Nuevo Cliente',
+                  onPressed: () => _showClientFormDialog(),
+                ),
+              ],
+            )
+          : null,
       body: Column(
         children: [
+          // Sub-barra interna estilo Eleventa (Clientes.png)
+          Container(
+            color: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1F4E79),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.receipt_long, size: 18),
+                    label: const Text('Estado de Cuenta', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () {
+                      if (_selectedClient != null) {
+                        _showStatementDialog(_selectedClient!);
+                      } else if (_clients.isNotEmpty) {
+                        _showStatementDialog(_clients.first);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Seleccione un cliente primero.')),
+                        );
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.person_add, size: 18),
+                    label: const Text('Nuevo Cliente', style: TextStyle(fontWeight: FontWeight.bold)),
+                    onPressed: () => _showClientFormDialog(),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1F4E79),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: const Text('Modificar Cliente'),
+                    onPressed: () {
+                      if (_selectedClient != null) {
+                        _showClientFormDialog(_selectedClient);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Seleccione un cliente para modificar.')),
+                        );
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red.shade700,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: const Text('Eliminar Cliente'),
+                    onPressed: () {
+                      if (_selectedClient != null) {
+                        _confirmDeleteClient(_selectedClient!);
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Seleccione un cliente para eliminar.')),
+                        );
+                      }
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  FilterChip(
+                    avatar: const Icon(Icons.summarize_outlined, size: 18),
+                    label: const Text('Reporte de Saldos (Solo Deudores)'),
+                    selected: _soloDeudores,
+                    onSelected: (val) {
+                      setState(() => _soloDeudores = val);
+                      _loadClients(_currentQuery);
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1),
           Padding(
             padding: const EdgeInsets.all(12.0),
             child: Row(
@@ -355,14 +570,25 @@ class _ClientsScreenState extends State<ClientsScreen> {
                         itemBuilder: (context, index) {
                           final c = _clients[index];
                           final hasDebt = c.saldoDeudor > 0;
+                          final isSelected = _selectedClient?.id == c.id;
                           return ListTile(
+                            selected: isSelected,
+                            selectedTileColor: const Color(0xFFE3F2FD),
+                            onTap: () => setState(() => _selectedClient = c),
                             leading: CircleAvatar(
                               backgroundColor: hasDebt ? Colors.red.shade100 : const Color(0xFF1F4E79).withValues(alpha: 0.1),
                               child: Icon(Icons.person, color: hasDebt ? Colors.red.shade800 : const Color(0xFF1F4E79)),
                             ),
                             title: Row(
                               children: [
-                                Text(c.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                Flexible(
+                                  child: Text(
+                                    c.nombre,
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
                                 const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
@@ -572,6 +798,7 @@ class _ClientAccountStatementDialogState extends State<_ClientAccountStatementDi
     );
   }
 
+
   @override
   Widget build(BuildContext context) {
     final double totalComprado = widget.initialMovements
@@ -629,7 +856,7 @@ class _ClientAccountStatementDialogState extends State<_ClientAccountStatementDi
                     ),
                     icon: const Icon(Icons.add, size: 18),
                     label: const Text('Registrar Abono', style: TextStyle(fontWeight: FontWeight.bold)),
-                    onPressed: widget.onRegistrarAbono,
+                    onPressed: widget.client.saldoDeudor > 0 ? widget.onRegistrarAbono : null,
                   ),
                   const SizedBox(width: 8),
                   IconButton(

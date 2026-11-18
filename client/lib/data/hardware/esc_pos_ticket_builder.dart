@@ -11,50 +11,87 @@ enum PaperSize {
   const PaperSize(this.maxChars);
 }
 
-/// Datos requeridos para imprimir el comprobante de venta fiscal/interno
+/// Datos requeridos para imprimir el comprobante de venta físico
 class TicketPrintData {
   final String negocioNombre;
+  final String? negocioLeyenda;
   final String? rfc;
   final String? direccion;
   final String? telefono;
+  final String? mensajeSuperior;
   final String folio;
   final DateTime fecha;
   final String cajero;
   final String turnoId;
+  final String clienteNombre;
   final List<SaleDetailItem> items;
   final double subtotal;
   final double descuentoTotal;
   final double total;
+  final double ajusteRedondeo;
   final List<PaymentMethodBreakdown> pagos;
   final double cambio;
   final String piePagina;
+  final String? garantia;
+  final String? notasTicket;
+  final String? fontFamily;
+
+  // Banderas de configuración de plantilla
+  final bool mostrarLogo;
+  final bool mostrarNombre;
+  final bool mostrarContacto;
+  final bool mostrarFolioFecha;
+  final bool mostrarCajero;
+  final bool mostrarCliente;
+  final bool mostrarDescuentosRedondeo;
+  final bool mostrarTotalLetra;
+  final bool mostrarCodigoBarras;
 
   const TicketPrintData({
     required this.negocioNombre,
+    this.negocioLeyenda,
     this.rfc,
     this.direccion,
     this.telefono,
+    this.mensajeSuperior,
     required this.folio,
     required this.fecha,
     required this.cajero,
     required this.turnoId,
+    this.clienteNombre = 'Público en General',
     required this.items,
     required this.subtotal,
     this.descuentoTotal = 0.0,
     required this.total,
+    this.ajusteRedondeo = 0.0,
     required this.pagos,
     required this.cambio,
-    this.piePagina = '¡Gracias por su compra!',
+    this.piePagina = '¡Gracias por su preferencia!',
+    this.garantia,
+    this.notasTicket,
+    this.fontFamily,
+    this.mostrarLogo = true,
+    this.mostrarNombre = true,
+    this.mostrarContacto = true,
+    this.mostrarFolioFecha = true,
+    this.mostrarCajero = true,
+    this.mostrarCliente = true,
+    this.mostrarDescuentosRedondeo = true,
+    this.mostrarTotalLetra = true,
+    this.mostrarCodigoBarras = true,
   });
 }
 
-/// Generador binario nativo de secuencias ESC/POS (Zero-Dependency)
+/// Generador binario nativo de secuencias ESC/POS y previsualización térmica
 class EscPosTicketBuilder {
   final PaperSize paperSize;
   final BytesBuilder _buffer = BytesBuilder();
 
   // Comandos estándar ESC/POS
   static const List<int> _escInit = [0x1B, 0x40]; // ESC @ (Inicializar)
+  static const List<int> _selectCodePage = [0x1B, 0x74, 0x10]; // ESC t 16 (WPC1252 para compatibilidad internacional)
+  static const List<int> _fontA = [0x1B, 0x4D, 0x00]; // ESC M 0 (Estándar Fuente A)
+  static const List<int> _fontB = [0x1B, 0x4D, 0x01]; // ESC M 1 (Condensada Fuente B)
   static const List<int> _alignLeft = [0x1B, 0x61, 0x00]; // ESC a 0
   static const List<int> _alignCenter = [0x1B, 0x61, 0x01]; // ESC a 1
   static const List<int> _alignRight = [0x1B, 0x61, 0x02]; // ESC a 2
@@ -62,60 +99,105 @@ class EscPosTicketBuilder {
   static const List<int> _boldOff = [0x1B, 0x45, 0x00]; // ESC E 0
   static const List<int> _doubleSize = [0x1D, 0x21, 0x11]; // GS ! 0x11 (2x Alto y Ancho)
   static const List<int> _normalSize = [0x1D, 0x21, 0x00]; // GS ! 0x00 (Normal)
-  static const List<int> _cutPaper = [0x1D, 0x56, 0x42, 0x00]; // GS V 66 0 (Corte parcial con avance)
-  static const List<int> _openDrawer = [0x1B, 0x70, 0x00, 0x19, 0xFA]; // Pulso a cajón de dinero
+  static const List<int> _cutPaper = [0x1D, 0x56, 0x42, 0x00]; // GS V 66 0 (Corte parcial)
+  static const List<int> _openDrawer = [0x1B, 0x70, 0x00, 0x19, 0xFA]; // Pulso cajón
+
+  /// Normaliza y sanitiza texto para prevenir caracteres extraños en impresoras térmicas
+  /// de arquitectura genérica o firmware fijado en CP437/CP850.
+  static String sanitizeTextForThermal(String input) {
+    if (input.isEmpty) return input;
+    return input
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ó', 'O')
+        .replaceAll('Ú', 'U')
+        .replaceAll('ñ', 'n')
+        .replaceAll('Ñ', 'N')
+        .replaceAll('ü', 'u')
+        .replaceAll('Ü', 'U')
+        .replaceAll('¿', '')
+        .replaceAll('¡', '')
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('‘', "'")
+        .replaceAll('’', "'");
+  }
 
   EscPosTicketBuilder({this.paperSize = PaperSize.mm80});
 
   Uint8List buildTicket(TicketPrintData data, {bool openCashDrawer = false}) {
     _buffer.clear();
 
-    // 1. Inicializar
+    // 1. Inicializar impresora y página de códigos internacional
     _buffer.add(_escInit);
+    _buffer.add(_selectCodePage);
+    if (data.fontFamily != null && data.fontFamily!.toLowerCase().contains('fuente b')) {
+      _buffer.add(_fontB);
+    } else {
+      _buffer.add(_fontA);
+    }
 
-    // Abrir cajón si se requiere cobro en efectivo
     if (openCashDrawer) {
       _buffer.add(_openDrawer);
     }
 
-    // 2. Encabezado del negocio
+    // 2. Encabezado del negocio (Estilo CARprog / El Gran Tlapalero)
     _buffer.add(_alignCenter);
-    _buffer.add(_boldOn);
-    _buffer.add(_doubleSize);
-    _writeText('${data.negocioNombre}\n');
-    _buffer.add(_normalSize);
-    _buffer.add(_boldOff);
+    if (data.mostrarNombre) {
+      _buffer.add(_boldOn);
+      _buffer.add(_doubleSize);
+      _writeText('${data.negocioNombre}\n');
+      _buffer.add(_normalSize);
+      _buffer.add(_boldOff);
 
-    if (data.rfc != null && data.rfc!.isNotEmpty) {
-      _writeText('RFC: ${data.rfc}\n');
+      if (data.negocioLeyenda != null && data.negocioLeyenda!.isNotEmpty) {
+        _writeText('${data.negocioLeyenda}\n');
+      }
     }
-    if (data.direccion != null && data.direccion!.isNotEmpty) {
-      _writeText('${data.direccion}\n');
+
+    if (data.mostrarContacto) {
+      if (data.direccion != null && data.direccion!.isNotEmpty) {
+        _writeText('${data.direccion}\n');
+      }
+      if (data.rfc != null && data.rfc!.isNotEmpty) {
+        _writeText('RFC: ${data.rfc}\n');
+      }
+      if (data.telefono != null && data.telefono!.isNotEmpty) {
+        _writeText('TEL: ${data.telefono}\n');
+      }
     }
-    if (data.telefono != null && data.telefono!.isNotEmpty) {
-      _writeText('TEL: ${data.telefono}\n');
+
+    if (data.mensajeSuperior != null && data.mensajeSuperior!.isNotEmpty) {
+      _writeText('${data.mensajeSuperior}\n');
     }
 
     _writeDivider('=');
 
     // 3. Metadatos de la Venta
     _buffer.add(_alignLeft);
-    _writeText('FOLIO: ${data.folio}\n');
-    _writeText('FECHA: ${_formatDate(data.fecha)}\n');
-    _writeText('CAJERO: ${data.cajero} | TURNO: ${data.turnoId.safePrefix(8)}\n');
+    if (data.mostrarFolioFecha) {
+      _writeText('FOLIO: ${data.folio}\n');
+      _writeText('FECHA: ${_formatDate(data.fecha)}\n');
+    }
+    if (data.mostrarCliente) {
+      _writeText('CLIENTE: ${data.clienteNombre}\n');
+    }
+    if (data.mostrarCajero) {
+      _writeText('CAJERO: ${data.cajero} | TURNO: ${data.turnoId.safePrefix(8)}\n');
+    }
 
     _writeDivider('-');
 
     // 4. Cabecera de Partidas
-    if (paperSize == PaperSize.mm80) {
-      _buffer.add(_boldOn);
-      _writeText('${_formatTwoColumns('CANT  DESCRIPCIÓN', 'TOTAL', paperSize.maxChars)}\n');
-      _buffer.add(_boldOff);
-    } else {
-      _buffer.add(_boldOn);
-      _writeText('${_formatTwoColumns('CANT DESCRIPCIÓN', 'IMPORTE', paperSize.maxChars)}\n');
-      _buffer.add(_boldOff);
-    }
+    _buffer.add(_boldOn);
+    _writeText('${_formatTwoColumns('CANT  DESCRIPCIÓN', 'TOTAL', paperSize.maxChars)}\n');
+    _buffer.add(_boldOff);
 
     _writeDivider('-');
 
@@ -133,55 +215,135 @@ class EscPosTicketBuilder {
         _writeText('${_formatTwoColumns('  P.U. \$${item.precioHistorico.toStringAsFixed(2)}', lineTotal, paperSize.maxChars)}\n');
       }
 
-      if (item.descuentoLinea > 0) {
+      if (data.mostrarDescuentosRedondeo && item.descuentoLinea > 0) {
         _writeText('${_formatTwoColumns('  (Desc.)', '-\$${item.descuentoLinea.toStringAsFixed(2)}', paperSize.maxChars)}\n');
       }
     }
 
     _writeDivider('-');
 
-    // 6. Totales y Liquidación
+    // 6. Totales y Liquidación (con fallback seguro en caso de desfase en modelo)
+    final double effectiveTotal = (data.total > 0)
+        ? data.total
+        : (data.items.isNotEmpty
+            ? double.parse((data.subtotal - data.descuentoTotal + data.ajusteRedondeo).toStringAsFixed(2))
+            : 0.0);
+
     _buffer.add(_alignRight);
     _writeText('${_formatTwoColumns('SUBTOTAL:', '\$${data.subtotal.toStringAsFixed(2)}', paperSize.maxChars)}\n');
 
-    if (data.descuentoTotal > 0) {
+    if (data.mostrarDescuentosRedondeo && data.descuentoTotal > 0) {
       _writeText('${_formatTwoColumns('DESCUENTO:', '-\$${data.descuentoTotal.toStringAsFixed(2)}', paperSize.maxChars)}\n');
+    }
+
+    if (data.mostrarDescuentosRedondeo && data.ajusteRedondeo != 0.0) {
+      final sign = data.ajusteRedondeo < 0 ? '-' : '+';
+      final absVal = data.ajusteRedondeo.abs().toStringAsFixed(2);
+      _writeText('${_formatTwoColumns('REDONDEO:', '$sign\$$absVal', paperSize.maxChars)}\n');
+      _writeText('${_formatTwoColumns('TOTAL EFECTIVO:', '\$${effectiveTotal.toStringAsFixed(2)}', paperSize.maxChars)}\n');
     }
 
     _buffer.add(_boldOn);
     _buffer.add(_doubleSize);
-    _writeText('${_formatTwoColumns('TOTAL:', '\$${data.total.toStringAsFixed(2)}', paperSize.maxChars ~/ (paperSize == PaperSize.mm80 ? 2 : 2))}\n');
+    _writeText('${_formatTwoColumns('TOTAL A PAGAR:', '\$${effectiveTotal.toStringAsFixed(2)}', paperSize.maxChars ~/ 2)}\n');
     _buffer.add(_normalSize);
     _buffer.add(_boldOff);
+
+    // Importe con letra
+    if (data.mostrarTotalLetra) {
+      _buffer.add(_alignLeft);
+      _writeText('(${numeroALetras(effectiveTotal)})\n');
+    }
 
     _writeDivider('-');
 
     // 7. Formas de Pago y Cambio
-    _buffer.add(_alignLeft);
     for (final p in data.pagos) {
-      final label = 'PAGO (${p.metodo.toUpperCase()}):';
+      final label = 'Forma de pago: ${p.metodo.toUpperCase()}';
       _writeText('${_formatTwoColumns(label, '\$${p.monto.toStringAsFixed(2)}', paperSize.maxChars)}\n');
     }
-    _buffer.add(_boldOn);
-    _writeText('${_formatTwoColumns('CAMBIO ENTREGADO:', '\$${data.cambio.toStringAsFixed(2)}', paperSize.maxChars)}\n');
-    _buffer.add(_boldOff);
+    if (data.cambio > 0) {
+      _buffer.add(_boldOn);
+      _writeText('${_formatTwoColumns('CAMBIO ENTREGADO:', '\$${data.cambio.toStringAsFixed(2)}', paperSize.maxChars)}\n');
+      _buffer.add(_boldOff);
+    }
+
+    // 7.1 Notas / Observaciones de la Venta
+    if (data.notasTicket != null && data.notasTicket!.trim().isNotEmpty) {
+      _writeDivider('-');
+      _buffer.add(_alignLeft);
+      _buffer.add(_boldOn);
+      _writeText('--- NOTAS DE LA VENTA ---\n');
+      _buffer.add(_boldOff);
+      for (final line in wrapText(data.notasTicket!.trim(), paperSize.maxChars)) {
+        _writeText('$line\n');
+      }
+    }
 
     _writeDivider('=');
 
-    // 8. Pie de Página y Salto de Papel
+    // 8. Leyendas Comerciales y Validación (Estilo Imagen IMG-20261020-WA0002)
     _buffer.add(_alignCenter);
-    _writeText('${data.piePagina}\n');
-    _writeText('Impreso en terminal Offline-First POS\n\n\n\n'); // Avance para guillotine
+    if (data.garantia != null && data.garantia!.isNotEmpty) {
+      _writeText('${data.garantia}\n\n');
+    }
+    if (data.piePagina.isNotEmpty) {
+      _writeText('${data.piePagina}\n\n');
+    }
 
-    // 9. Corte de Papel
+    // 9. Código de Barras Folio (GS k)
+    if (data.mostrarCodigoBarras) {
+      _writeBarcode(data.folio);
+      _writeText('\n* ${data.folio} *\n\n\n\n');
+    } else {
+      _writeText('\n* ${data.folio} *\n\n\n');
+    }
+
+    // 10. Corte de Papel
     _buffer.add(_cutPaper);
 
     return _buffer.toBytes();
   }
 
+  static List<String> wrapText(String text, int maxWidth) {
+    if (text.isEmpty) return [];
+    final List<String> lines = [];
+    final rawLines = text.split('\n');
+    for (final raw in rawLines) {
+      if (raw.length <= maxWidth) {
+        lines.add(raw);
+        continue;
+      }
+      final words = raw.split(' ');
+      String current = '';
+      for (final w in words) {
+        if (current.isEmpty) {
+          current = w;
+        } else if (current.length + 1 + w.length <= maxWidth) {
+          current += ' $w';
+        } else {
+          lines.add(current);
+          current = w;
+        }
+      }
+      if (current.isNotEmpty) {
+        lines.add(current);
+      }
+    }
+    return lines;
+  }
+
+  void _writeBarcode(String text) {
+    final clean = text.replaceAll(RegExp(r'[^A-Za-z0-9\-]'), '');
+    if (clean.isEmpty) return;
+    final bytes = latin1.encode(clean);
+    _buffer.add([0x1D, 0x6B, 0x04]); // GS k 4 (Code 39)
+    _buffer.add(bytes);
+    _buffer.add([0x00]); // Null terminator
+  }
+
   void _writeText(String text) {
-    // Codificación Latin-1 / ISO-8859-1 para soporte directo de caracteres especiales y acentos en ESC/POS
-    _buffer.add(latin1.encode(text));
+    _buffer.add(latin1.encode(sanitizeTextForThermal(text)));
   }
 
   void _writeDivider(String char) {
@@ -204,14 +366,19 @@ class EscPosTicketBuilder {
     final d = dt.day.toString().padLeft(2, '0');
     final h = dt.hour.toString().padLeft(2, '0');
     final min = dt.minute.toString().padLeft(2, '0');
-    final s = dt.second.toString().padLeft(2, '0');
-    return '$y-$m-$d $h:$min:$s';
+    return '$d/$m/$y $h:$min';
   }
 
-  /// Genera representación de texto plano monoespaciado para previsualización térmica
+  /// Genera representación de texto plano para previsualización térmica en pantalla
   String buildPlainText(TicketPrintData data) {
     final sb = StringBuffer();
     final width = paperSize.maxChars;
+
+    final double effectiveTotal = (data.total > 0)
+        ? data.total
+        : (data.items.isNotEmpty
+            ? double.parse((data.subtotal - data.descuentoTotal + data.ajusteRedondeo).toStringAsFixed(2))
+            : 0.0);
 
     void addCentered(String text) {
       if (text.length >= width) {
@@ -222,14 +389,34 @@ class EscPosTicketBuilder {
       }
     }
 
-    addCentered(data.negocioNombre);
-    if (data.rfc != null && data.rfc!.isNotEmpty) addCentered('RFC: ${data.rfc}');
-    if (data.direccion != null && data.direccion!.isNotEmpty) addCentered(data.direccion!);
-    if (data.telefono != null && data.telefono!.isNotEmpty) addCentered('TEL: ${data.telefono}');
+    if (data.mostrarNombre) {
+      addCentered(data.negocioNombre);
+      if (data.negocioLeyenda != null && data.negocioLeyenda!.isNotEmpty) {
+        addCentered(data.negocioLeyenda!);
+      }
+    }
+
+    if (data.mostrarContacto) {
+      if (data.direccion != null && data.direccion!.isNotEmpty) addCentered(data.direccion!);
+      if (data.rfc != null && data.rfc!.isNotEmpty) addCentered('RFC: ${data.rfc}');
+      if (data.telefono != null && data.telefono!.isNotEmpty) addCentered('TEL: ${data.telefono}');
+    }
+
+    if (data.mensajeSuperior != null && data.mensajeSuperior!.isNotEmpty) {
+      addCentered(data.mensajeSuperior!);
+    }
+
     sb.writeln('=' * width);
 
-    sb.writeln(_formatTwoColumns('FOLIO: ${data.folio}', _formatDate(data.fecha), width));
-    sb.writeln('CAJERO: ${data.cajero} | TURNO: ${data.turnoId}');
+    if (data.mostrarFolioFecha) {
+      sb.writeln(_formatTwoColumns('FOLIO: ${data.folio}', _formatDate(data.fecha), width));
+    }
+    if (data.mostrarCliente) {
+      sb.writeln('CLIENTE: ${data.clienteNombre}');
+    }
+    if (data.mostrarCajero) {
+      sb.writeln('CAJERO: ${data.cajero} | TURNO: ${data.turnoId}');
+    }
     sb.writeln('-' * width);
 
     sb.writeln(_formatTwoColumns('CANT  DESCRIPCION', 'TOTAL', width));
@@ -242,22 +429,51 @@ class EscPosTicketBuilder {
       if (item.etiquetaPrecio.isNotEmpty && item.etiquetaPrecio != 'Público') {
         sb.writeln('  [Nivel: ${item.etiquetaPrecio}]');
       }
+      if (data.mostrarDescuentosRedondeo && item.descuentoLinea > 0) {
+        sb.writeln(_formatTwoColumns('  (Desc.)', '-\$${item.descuentoLinea.toStringAsFixed(2)}', width));
+      }
     }
 
     sb.writeln('-' * width);
     sb.writeln(_formatTwoColumns('SUBTOTAL:', '\$${data.subtotal.toStringAsFixed(2)}', width));
-    if (data.descuentoTotal > 0) {
+    if (data.mostrarDescuentosRedondeo && data.descuentoTotal > 0) {
       sb.writeln(_formatTwoColumns('DESCUENTO:', '-\$${data.descuentoTotal.toStringAsFixed(2)}', width));
     }
-    sb.writeln(_formatTwoColumns('TOTAL:', '\$${data.total.toStringAsFixed(2)}', width));
+    if (data.mostrarDescuentosRedondeo && data.ajusteRedondeo != 0.0) {
+      final sign = data.ajusteRedondeo < 0 ? '-' : '+';
+      sb.writeln(_formatTwoColumns('REDONDEO:', '$sign\$${data.ajusteRedondeo.abs().toStringAsFixed(2)}', width));
+    }
+    sb.writeln(_formatTwoColumns('TOTAL A PAGAR:', '\$${effectiveTotal.toStringAsFixed(2)}', width));
+    if (data.mostrarTotalLetra) {
+      sb.writeln('(${numeroALetras(effectiveTotal)})');
+    }
     sb.writeln('=' * width);
 
     for (final p in data.pagos) {
-      sb.writeln(_formatTwoColumns('PAGO (${p.metodo.toUpperCase()}):', '\$${p.monto.toStringAsFixed(2)}', width));
+      sb.writeln(_formatTwoColumns('Forma de pago: ${p.metodo.toUpperCase()}', '\$${p.monto.toStringAsFixed(2)}', width));
     }
-    sb.writeln(_formatTwoColumns('CAMBIO:', '\$${data.cambio.toStringAsFixed(2)}', width));
+    if (data.cambio > 0) {
+      sb.writeln(_formatTwoColumns('CAMBIO:', '\$${data.cambio.toStringAsFixed(2)}', width));
+    }
+    if (data.notasTicket != null && data.notasTicket!.trim().isNotEmpty) {
+      sb.writeln('-' * width);
+      sb.writeln('--- NOTAS DE LA VENTA ---');
+      for (final line in wrapText(data.notasTicket!.trim(), width)) {
+        sb.writeln(line);
+      }
+    }
     sb.writeln('=' * width);
-    addCentered(data.piePagina);
+    if (data.garantia != null && data.garantia!.isNotEmpty) {
+      addCentered(data.garantia!);
+    }
+    if (data.piePagina.isNotEmpty) {
+      addCentered(data.piePagina);
+    }
+    sb.writeln('');
+    if (data.mostrarCodigoBarras) {
+      addCentered('|| |||||| | |||||||| |||||');
+    }
+    addCentered('* ${data.folio} *');
 
     return sb.toString();
   }

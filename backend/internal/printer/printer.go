@@ -1,6 +1,8 @@
 package printer
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -26,6 +28,14 @@ type PrintRequest struct {
 type PrintResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+type DeviceStatusResponse struct {
+	Success       bool     `json:"success"`
+	Printers      []string `json:"printers"`
+	SerialPorts   []string `json:"serial_ports"`
+	ServiceStatus string   `json:"service_status"`
+	Timestamp     string   `json:"timestamp"`
 }
 
 // Windows winspool.drv lazy binding para impresión RAW sin diálogos
@@ -59,30 +69,125 @@ type docInfo1 struct {
 	Datatype   *uint16
 }
 
-// GetInstalledPrinters lista las impresoras instaladas en el SO
+// GetInstalledPrinters lista las impresoras instaladas en el SO con arquitectura multimétodo de fallback
 func GetInstalledPrinters() ([]string, error) {
 	if runtime.GOOS != "windows" {
 		return []string{"Default Printer (Non-Windows)"}, nil
 	}
 
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", "Get-Printer | Select-Object -ExpandProperty Name")
-	out, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("error ejecutando Get-Printer: %w", err)
-	}
-
-	rawLines := strings.Split(string(out), "\n")
+	seen := make(map[string]bool)
 	var printers []string
-	for _, l := range rawLines {
-		name := strings.TrimSpace(l)
-		if name != "" {
+
+	addPrinter := func(name string) {
+		name = strings.TrimSpace(name)
+		if name != "" && !seen[name] {
+			seen[name] = true
 			printers = append(printers, name)
 		}
 	}
+
+	// Método 1: PowerShell CIM Instance Win32_Printer (Más rápido y moderno en Win 10/11)
+	cmd1 := exec.Command("powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_Printer | Select-Object -ExpandProperty Name")
+	if out, err := cmd1.Output(); err == nil && len(out) > 0 {
+		for _, l := range strings.Split(string(out), "\n") {
+			addPrinter(l)
+		}
+	}
+
+	// Método 2: PowerShell Get-Printer estándar (si está presente PrintManagement)
+	if len(printers) == 0 {
+		cmd2 := exec.Command("powershell", "-NoProfile", "-Command", "Get-Printer | Select-Object -ExpandProperty Name")
+		if out, err := cmd2.Output(); err == nil && len(out) > 0 {
+			for _, l := range strings.Split(string(out), "\n") {
+				addPrinter(l)
+			}
+		}
+	}
+
+	// Método 3: Registro de Windows (HKCU\Software\Microsoft\Windows NT\CurrentVersion\Devices)
+	if len(printers) == 0 {
+		cmd3 := exec.Command("reg", "query", `HKCU\Software\Microsoft\Windows NT\CurrentVersion\Devices`)
+		if out, err := cmd3.Output(); err == nil && len(out) > 0 {
+			scanner := bufio.NewScanner(bytes.NewReader(out))
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if strings.Contains(line, "REG_SZ") {
+					parts := strings.Split(line, "REG_SZ")
+					if len(parts) >= 2 {
+						pName := strings.TrimSpace(parts[0])
+						addPrinter(pName)
+					}
+				}
+			}
+		}
+	}
+
+	// Método 4: WMIC (Fallback legado en Windows antiguos)
+	if len(printers) == 0 {
+		cmd4 := exec.Command("wmic", "printer", "get", "Name", "/format:csv")
+		if out, err := cmd4.Output(); err == nil && len(out) > 0 {
+			for _, l := range strings.Split(string(out), "\n") {
+				parts := strings.Split(strings.TrimSpace(l), ",")
+				if len(parts) >= 2 {
+					candidate := parts[len(parts)-1]
+					if candidate != "Name" && candidate != "" {
+						addPrinter(candidate)
+					}
+				}
+			}
+		}
+	}
+
 	return printers, nil
 }
 
-// PrintRaw envia bytes a la impresora especificada
+// GetAvailableSerialPorts detecta puertos COM físicos o emulados por USB
+func GetAvailableSerialPorts() []string {
+	if runtime.GOOS != "windows" {
+		return []string{}
+	}
+
+	var ports []string
+	seen := make(map[string]bool)
+
+	addPort := func(p string) {
+		p = strings.TrimSpace(p)
+		if p != "" && !seen[p] {
+			seen[p] = true
+			ports = append(ports, p)
+		}
+	}
+
+	// Método 1: .NET SerialPort GetPortNames
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", "[System.IO.Ports.SerialPort]::GetPortNames()")
+	if out, err := cmd.Output(); err == nil && len(out) > 0 {
+		for _, l := range strings.Split(string(out), "\n") {
+			addPort(l)
+		}
+	}
+
+	// Método 2: Registro de Windows SERIALCOMM
+	if len(ports) == 0 {
+		cmdReg := exec.Command("reg", "query", `HKLM\HARDWARE\DEVICEMAP\SERIALCOMM`)
+		if out, err := cmdReg.Output(); err == nil && len(out) > 0 {
+			scanner := bufio.NewScanner(bytes.NewReader(out))
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if strings.Contains(line, "REG_SZ") {
+					parts := strings.Split(line, "REG_SZ")
+					if len(parts) >= 2 {
+						portName := strings.TrimSpace(parts[1])
+						addPort(portName)
+					}
+				}
+			}
+		}
+	}
+
+	return ports
+}
+
+// PrintRaw envía bytes a la impresora especificada
 func PrintRaw(req PrintRequest) error {
 	var data []byte
 
@@ -204,6 +309,21 @@ func (h *Handler) GetPrinters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{"printers": printers, "count": len(printers)})
+}
+
+func (h *Handler) GetDevices(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	printers, _ := GetInstalledPrinters()
+	ports := GetAvailableSerialPorts()
+
+	resp := DeviceStatusResponse{
+		Success:       true,
+		Printers:      printers,
+		SerialPorts:   ports,
+		ServiceStatus: "ONLINE",
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) Print(w http.ResponseWriter, r *http.Request) {

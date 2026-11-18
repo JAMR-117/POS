@@ -157,8 +157,10 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
                   prefixIcon: Icon(Icons.inventory_2),
                 ),
                 validator: (v) {
-                  if (v == null || v.isEmpty) return 'Ingrese el conteo real';
-                  if (double.tryParse(v) == null) return 'Valor inválido';
+                  if (v == null || v.trim().isEmpty) return 'Ingrese el conteo real';
+                  final val = double.tryParse(v);
+                  if (val == null) return 'Valor numérico inválido';
+                  if (val < 0) return 'El stock físico no puede ser negativo (< 0)';
                   return null;
                 },
               ),
@@ -178,9 +180,9 @@ class _StockAdjustmentDialogState extends State<StockAdjustmentDialog> {
               DropdownButtonFormField<String>(
                 decoration: const InputDecoration(labelText: 'Motivo de Ajuste *', border: OutlineInputBorder()),
                 initialValue: _selectedReason,
+                validator: (v) => (v == null || v.isEmpty) ? 'El motivo del ajuste es obligatorio' : null,
                 items: _motivos.map((m) => DropdownMenuItem(value: m, child: Text(m))).toList(),
                 onChanged: (val) => setState(() => _selectedReason = val),
-                validator: (v) => v == null ? 'Seleccione un motivo' : null,
               ),
             ],
           ),

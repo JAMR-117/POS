@@ -83,6 +83,8 @@ class ShiftSummary {
     this.gananciaEstimada = 0.0,
     this.ventasPorDepartamento = const {},
   });
+
+  bool get isConsolidatedDay => shiftId.startsWith('DIA-');
 }
 
 class ShiftRepository {
@@ -213,23 +215,44 @@ class ShiftRepository {
     double sumTotal = 0.0;
 
     for (final row in salesRows) {
-      sumTotal += (row['total'] as num).toDouble();
-      final desgloseJson = row['pagos_desglose'] as String;
-      final List<dynamic> payments = jsonDecode(desgloseJson);
+      final t = (row['total'] as num?)?.toDouble() ?? 0.0;
+      sumTotal += t;
+      final rawDesglose = row['pagos_desglose'];
 
-      for (final p in payments) {
-        final method = (p['metodo'] as String).toLowerCase();
-        final amount = (p['monto'] as num).toDouble();
+      if (rawDesglose != null && rawDesglose is String && rawDesglose.trim().isNotEmpty) {
+        try {
+          final List<dynamic> payments = jsonDecode(rawDesglose);
+          for (final p in payments) {
+            final method = ((p['metodo'] ?? '') as String).toLowerCase();
+            final amount = (p['monto'] as num?)?.toDouble() ?? 0.0;
 
-        if (method == 'efectivo') {
-          sumEfectivo += amount;
-        } else if (method == 'tarjeta') {
-          sumTarjeta += amount;
-        } else {
-          sumTransferencia += amount;
+            if (method.contains('efectivo')) {
+              sumEfectivo += amount;
+            } else if (method.contains('tarjeta')) {
+              sumTarjeta += amount;
+            } else {
+              sumTransferencia += amount;
+            }
+          }
+        } catch (_) {
+          sumEfectivo += t;
         }
+      } else {
+        sumEfectivo += t;
       }
     }
+
+    // Abonos a crédito cobrados durante este turno
+    double abonosEfectivo = 0.0;
+    try {
+      final abonosRows = await db.rawQuery(
+        'SELECT COALESCE(SUM(monto), 0.0) as total_abonos FROM abonos_credito WHERE corte_caja_id = ?',
+        [shiftId],
+      );
+      if (abonosRows.isNotEmpty) {
+        abonosEfectivo = (abonosRows.first['total_abonos'] as num?)?.toDouble() ?? 0.0;
+      }
+    } catch (_) {}
 
     // Movimientos de entrada / salida de caja
     final movRows = await db.query(
@@ -241,7 +264,7 @@ class ShiftRepository {
     double salidas = 0.0;
     for (final m in movRows) {
       final tipo = m['tipo'] as String;
-      final monto = (m['monto'] as num).toDouble();
+      final monto = (m['monto'] as num?)?.toDouble() ?? 0.0;
       if (tipo == 'entrada') {
         entradas += monto;
       } else {
@@ -249,16 +272,16 @@ class ShiftRepository {
       }
     }
 
-    // Desglose de ventas por departamento y cálculo de costo/ganancia
+    // Desglose de ventas por departamento y cálculo de costo/ganancia con LEFT JOIN
     final deptoRows = await db.rawQuery('''
       SELECT COALESCE(p.departamento, 'General') as depto,
-             SUM(dv.total_linea) as total_depto,
-             SUM(dv.cantidad * dv.costo_historico) as costo_depto
+             COALESCE(SUM(dv.total_linea), 0.0) as total_depto,
+             COALESCE(SUM(dv.cantidad * dv.costo_historico), 0.0) as costo_depto
       FROM detalles_venta dv
-      JOIN productos p ON dv.producto_id = p.id
+      LEFT JOIN productos p ON dv.producto_id = p.id
       JOIN ventas v ON dv.venta_id = v.id
       WHERE v.corte_caja_id = ? AND v.estatus != 'cancelado'
-      GROUP BY p.departamento
+      GROUP BY COALESCE(p.departamento, 'General')
     ''', [shiftId]);
 
     final Map<String, double> deptoMap = {};
@@ -273,7 +296,7 @@ class ShiftRepository {
 
     final double ganancia = _roundTo2(sumTotal - totalCostos);
     final double retirosTotales = shift.montoRetiros > 0 ? shift.montoRetiros : salidas;
-    final double esperadoEnCaja = shift.montoInicial + sumEfectivo + entradas - retirosTotales;
+    final double esperadoEnCaja = shift.montoInicial + sumEfectivo + abonosEfectivo + entradas - retirosTotales;
 
     return ShiftSummary(
       shiftId: shiftId,
@@ -294,6 +317,129 @@ class ShiftRepository {
   /// Retorna el reporte acumulado del turno en curso (Corte X) sin cerrar la sesión
   Future<ShiftSummary> generateCorteX(String shiftId) async {
     return await getShiftSummary(shiftId);
+  }
+
+  /// Consulta el consolidado global de ventas del dia actual (util para Administradores
+  /// o cuando no existe un turno individual de cajero abierto).
+  Future<ShiftSummary> getDailyConsolidatedSummary({String? usuarioId}) async {
+    final db = await _dbHelper.database;
+    final now = DateTime.now();
+    final todayStr = '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+
+    final whereClause = usuarioId != null
+        ? "(DATE(fecha_venta, 'localtime') = DATE('now', 'localtime') OR fecha_venta LIKE '$todayStr%') AND estatus != 'cancelado' AND usuario_id = ?"
+        : "(DATE(fecha_venta, 'localtime') = DATE('now', 'localtime') OR fecha_venta LIKE '$todayStr%') AND estatus != 'cancelado'";
+    final whereArgs = usuarioId != null ? [usuarioId] : null;
+
+    final salesRows = await db.query(
+      'ventas',
+      columns: ['total', 'pagos_desglose'],
+      where: whereClause,
+      whereArgs: whereArgs,
+    );
+
+    double sumEfectivo = 0.0;
+    double sumTarjeta = 0.0;
+    double sumTransferencia = 0.0;
+    double sumTotal = 0.0;
+
+    for (final row in salesRows) {
+      final t = (row['total'] as num?)?.toDouble() ?? 0.0;
+      sumTotal += t;
+      final rawDesglose = row['pagos_desglose'];
+
+      if (rawDesglose != null && rawDesglose is String && rawDesglose.trim().isNotEmpty) {
+        try {
+          final List<dynamic> payments = jsonDecode(rawDesglose);
+          for (final p in payments) {
+            final method = ((p['metodo'] ?? '') as String).toLowerCase();
+            final amount = (p['monto'] as num?)?.toDouble() ?? 0.0;
+
+            if (method.contains('efectivo')) {
+              sumEfectivo += amount;
+            } else if (method.contains('tarjeta')) {
+              sumTarjeta += amount;
+            } else {
+              sumTransferencia += amount;
+            }
+          }
+        } catch (_) {
+          sumEfectivo += t;
+        }
+      } else {
+        sumEfectivo += t;
+      }
+    }
+
+    // Abonos del dia
+    double abonosEfectivo = 0.0;
+    try {
+      final abonosRows = await db.rawQuery(
+        "SELECT COALESCE(SUM(monto), 0.0) as total_abonos FROM abonos_credito WHERE (DATE(fecha_abono, 'localtime') = DATE('now', 'localtime') OR fecha_abono LIKE '$todayStr%')",
+      );
+      if (abonosRows.isNotEmpty) {
+        abonosEfectivo = (abonosRows.first['total_abonos'] as num?)?.toDouble() ?? 0.0;
+      }
+    } catch (_) {}
+
+    // Movimientos del dia
+    double entradas = 0.0;
+    double salidas = 0.0;
+    try {
+      final movRows = await db.rawQuery(
+        "SELECT tipo, COALESCE(SUM(monto), 0.0) as total_monto FROM movimientos_caja WHERE (DATE(fecha_movimiento, 'localtime') = DATE('now', 'localtime') OR fecha_movimiento LIKE '$todayStr%') GROUP BY tipo",
+      );
+      for (final m in movRows) {
+        final tipo = m['tipo'] as String;
+        final monto = (m['total_monto'] as num?)?.toDouble() ?? 0.0;
+        if (tipo == 'entrada') {
+          entradas += monto;
+        } else {
+          salidas += monto;
+        }
+      }
+    } catch (_) {}
+
+    // Desglose de departamentos del dia
+    final deptoRows = await db.rawQuery('''
+      SELECT COALESCE(p.departamento, 'General') as depto,
+             COALESCE(SUM(dv.total_linea), 0.0) as total_depto,
+             COALESCE(SUM(dv.cantidad * dv.costo_historico), 0.0) as costo_depto
+      FROM detalles_venta dv
+      LEFT JOIN productos p ON dv.producto_id = p.id
+      JOIN ventas v ON dv.venta_id = v.id
+      WHERE (DATE(v.fecha_venta, 'localtime') = DATE('now', 'localtime') OR v.fecha_venta LIKE '$todayStr%') AND v.estatus != 'cancelado'
+      GROUP BY COALESCE(p.departamento, 'General')
+    ''');
+
+    final Map<String, double> deptoMap = {};
+    double totalCostos = 0.0;
+    for (final r in deptoRows) {
+      final String d = r['depto'] as String;
+      final double totalD = (r['total_depto'] as num?)?.toDouble() ?? 0.0;
+      final double costoD = (r['costo_depto'] as num?)?.toDouble() ?? 0.0;
+      deptoMap[d] = _roundTo2(totalD);
+      totalCostos += costoD;
+    }
+
+    final double ganancia = _roundTo2(sumTotal - totalCostos);
+    final double retirosTotales = salidas;
+    final double esperadoEnCaja = sumEfectivo + abonosEfectivo + entradas - retirosTotales;
+
+    return ShiftSummary(
+      shiftId: 'DIA-$todayStr',
+      montoInicial: 0.0,
+      ventasEfectivo: _roundTo2(sumEfectivo),
+      ventasTarjeta: _roundTo2(sumTarjeta),
+      ventasTransferencia: _roundTo2(sumTransferencia),
+      totalVentas: _roundTo2(sumTotal),
+      totalTickets: salesRows.length,
+      totalEfectivoEsperado: _roundTo2(esperadoEnCaja),
+      entradasEfectivo: _roundTo2(entradas),
+      salidasEfectivo: _roundTo2(retirosTotales),
+      gananciaEstimada: ganancia,
+      ventasPorDepartamento: deptoMap,
+    );
   }
 
   /// Cierre atómico del turno (Corte Z) y generación del evento Outbox
@@ -378,6 +524,51 @@ class ShiftRepository {
     final movementId = _generateUUID();
 
     await db.transaction((txn) async {
+      // 0. Validación de Integridad de Caja
+      if (monto <= 0) {
+        throw Exception('El monto del movimiento debe ser estrictamente mayor a 0.');
+      }
+      if (concepto.trim().length < 3) {
+        throw Exception('El concepto debe contener al menos 3 caracteres reales.');
+      }
+
+      if (tipo == 'salida') {
+        // Consultar fondo inicial del turno activo
+        final shiftRows = await txn.query('cortes_caja', where: 'id = ?', whereArgs: [shiftId]);
+        if (shiftRows.isEmpty) throw Exception('No se encontró el turno activo para registrar el movimiento.');
+        final double montoInicial = (shiftRows.first['monto_inicial'] as num?)?.toDouble() ?? 0.0;
+
+        // Sumar ventas en efectivo
+        final salesRows = await txn.query('ventas', where: "corte_caja_id = ? AND estatus != 'cancelado'", whereArgs: [shiftId]);
+        double ventasEfectivo = 0.0;
+        for (final s in salesRows) {
+          final desglose = s['pagos_desglose'] as String? ?? '{}';
+          try {
+            final pMap = jsonDecode(desglose) as Map<String, dynamic>;
+            ventasEfectivo += (pMap['efectivo'] as num?)?.toDouble() ?? 0.0;
+          } catch (_) {}
+        }
+
+        // Sumar entradas y salidas previas
+        final movRows = await txn.query('movimientos_caja', where: 'corte_caja_id = ?', whereArgs: [shiftId]);
+        double entradas = 0.0;
+        double salidas = 0.0;
+        for (final m in movRows) {
+          final t = m['tipo'] as String;
+          final amt = (m['monto'] as num).toDouble();
+          if (t == 'entrada') {
+            entradas += amt;
+          } else {
+            salidas += amt;
+          }
+        }
+
+        final double efectivoDisponibleEnCaja = montoInicial + ventasEfectivo + entradas - salidas;
+        if (monto > efectivoDisponibleEnCaja + 0.001) {
+          throw Exception('Fondos insuficientes en caja: El monto de salida (\$${monto.toStringAsFixed(2)}) no puede exceder el efectivo disponible (\$${efectivoDisponibleEnCaja.toStringAsFixed(2)}).');
+        }
+      }
+
       // 1. Insertar el movimiento histórico
       await txn.insert('movimientos_caja', {
         'id': movementId,

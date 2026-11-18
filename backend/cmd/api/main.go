@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"pos-backend/internal/files"
 	"pos-backend/internal/inventory"
 	"pos-backend/internal/printer"
 	"pos-backend/internal/store"
@@ -149,6 +150,7 @@ func main() {
 	inventoryHandler := inventory.NewHandler(inventoryService)
 
 	printerHandler := printer.NewHandler()
+	filesHandler := files.NewHandler()
 
 	// 4. Router Chi y Middlewares
 	r := chi.NewRouter()
@@ -198,7 +200,13 @@ func main() {
 
 		// Rutas de Impresión Térmica Física (Puente Local / Network)
 		r.Get("/printers", printerHandler.GetPrinters)
+		r.Get("/devices", printerHandler.GetDevices)
 		r.Post("/print", printerHandler.Print)
+
+		// Rutas de Exportación de Archivos y Portapapeles (PDFs e Imagen WhatsApp)
+		r.Post("/files/save-pdf", filesHandler.SavePdf)
+		r.Post("/files/open", filesHandler.OpenFile)
+		r.Post("/clipboard/image", filesHandler.CopyImageToClipboard)
 	})
 
 	// 5. Servidor HTTP y Apagado Controlado

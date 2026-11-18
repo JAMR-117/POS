@@ -381,9 +381,11 @@ class SaleTransactionRequest {
   final double descuentoTotal;
   final double impuestosTotal;
   final double total;
+  final double ajusteRedondeo;
   final List<PaymentMethodBreakdown> pagosDesglose;
   final List<SaleDetailItem> items;
   final DateTime fechaVenta;
+  final String? notasTicket;
 
   SaleTransactionRequest({
     required this.ventaId,
@@ -395,8 +397,10 @@ class SaleTransactionRequest {
     this.descuentoTotal = 0.0,
     this.impuestosTotal = 0.0,
     required this.total,
+    this.ajusteRedondeo = 0.0,
     required this.pagosDesglose,
     required this.items,
+    this.notasTicket,
     DateTime? fechaVenta,
   }) : fechaVenta = fechaVenta ?? DateTime.now().toUtc();
 }
@@ -466,19 +470,24 @@ class Cliente {
 
   factory Cliente.fromMap(Map<String, dynamic> map) {
     return Cliente(
-      id: map['id'] as String,
-      nombre: map['nombre'] as String,
-      rfcODni: map['rfc_o_dni'] as String?,
-      regimenFiscal: map['regimen_fiscal'] as String?,
-      usoCfdi: map['uso_cfdi'] as String?,
-      codigoPostal: map['codigo_postal'] as String?,
-      correo: map['correo'] as String?,
-      telefono: map['telefono'] as String?,
-      direccion: map['direccion'] as String?,
+      id: map['id']?.toString() ?? '',
+      nombre: map['nombre']?.toString() ?? 'Público en General',
+      rfcODni: map['rfc_o_dni']?.toString() ?? map['rfc']?.toString(),
+      regimenFiscal: map['regimen_fiscal']?.toString(),
+      usoCfdi: map['uso_cfdi']?.toString(),
+      codigoPostal: map['codigo_postal']?.toString() ?? map['cp']?.toString(),
+      correo: map['correo']?.toString() ?? map['email']?.toString(),
+      telefono: map['telefono']?.toString(),
+      direccion: map['direccion']?.toString(),
       limiteCredito: (map['limite_credito'] as num?)?.toDouble() ?? 0.0,
-      saldoDeudor: (map['saldo_deudor'] as num?)?.toDouble() ?? 0.0,
-      tarifaPreferencial: map['tarifa_preferencial'] as String? ?? 'Público',
-      activo: (map['activo'] as int? ?? 1) == 1,
+      saldoDeudor: (map['saldo_deudor'] as num?)?.toDouble() ??
+          (map['saldo_actual'] as num?)?.toDouble() ??
+          0.0,
+      tarifaPreferencial: map['tarifa_preferencial']?.toString() ?? 'Público',
+      activo: map['activo'] == null ||
+          map['activo'] == 1 ||
+          map['activo'] == true ||
+          map['activo'] == '1',
     );
   }
 

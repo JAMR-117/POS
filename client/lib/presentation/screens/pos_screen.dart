@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/local/database_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 // Modelos y Repositorios Locales
-import '../../core/department_theme.dart';
 import '../../core/string_utils.dart';
 import '../../data/local/models.dart';
+import '../../data/local/business_config.dart';
 import '../../data/sync/sync_worker.dart';
 import '../../data/inventory/inventory_api_client.dart';
 import '../../data/hardware/printer_service.dart';
@@ -38,6 +41,7 @@ import '../widgets/cash_movement_dialog.dart';
 import '../widgets/insufficient_stock_dialog.dart';
 import '../widgets/product_or_service_action_dialog.dart';
 import '../widgets/edit_service_line_dialog.dart';
+import '../widgets/unified_pricing_dialog.dart';
 
 // ---------------------------------------------------------------------------
 // DECLARACIÓN DE INTENCIONES PARA ATAJOS DE TECLADO
@@ -54,6 +58,11 @@ class QuoteIntent extends Intent { const QuoteIntent(); }
 class CommonArticleIntent extends Intent { const CommonArticleIntent(); }
 class CashMovementIntent extends Intent { const CashMovementIntent(); }
 class SalesHistoryIntent extends Intent { const SalesHistoryIntent(); }
+class ModuleVentasIntent extends Intent { const ModuleVentasIntent(); }
+class ModuleClientesIntent extends Intent { const ModuleClientesIntent(); }
+class ModuleProductosIntent extends Intent { const ModuleProductosIntent(); }
+class ModuleInventarioIntent extends Intent { const ModuleInventarioIntent(); }
+class ModuleHistorialIntent extends Intent { const ModuleHistorialIntent(); }
 
 class PosScreen extends StatefulWidget {
   final CartController cartController;
@@ -84,40 +93,114 @@ class PosScreen extends StatefulWidget {
 }
 
 class _PosScreenState extends State<PosScreen> {
+  int _activeModuleIndex = 0; // 0: Ventas (F1), 1: Clientes (F2), 2: Productos (F3), 3: Inventario (F4), 4: Historial (F10), 5: Configuración
+  String _currentBusinessName = 'CARprog';
+  String _currentBusinessSubtitle = 'Cerrajería y Electrónica';
+  String? _currentLogoBase64;
+  String _pdfSaveDirectory = r'C:\POS\Cotizaciones';
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
 
+  // Búfer para capturar ráfagas de lector de código de barras USB/HID
+  final StringBuffer _globalBarcodeBuffer = StringBuffer();
+  DateTime _lastGlobalKeyTime = DateTime.now();
+
+  bool _handleHardwareScanWedge(KeyEvent event) {
+    if (_activeModuleIndex != 0) return false;
+    if (_searchFocusNode.hasFocus) return false;
+
+    if (event is KeyDownEvent) {
+      final now = DateTime.now();
+      final diff = now.difference(_lastGlobalKeyTime).inMilliseconds;
+      _lastGlobalKeyTime = now;
+
+      if (diff > 120) {
+        _globalBarcodeBuffer.clear();
+      }
+
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+        if (_globalBarcodeBuffer.isNotEmpty) {
+          final code = _globalBarcodeBuffer.toString().trim();
+          _globalBarcodeBuffer.clear();
+          if (code.length >= 3) {
+            _handleBarcodeScan(code);
+            return true;
+          }
+        }
+      } else if (event.character != null &&
+          event.character!.isNotEmpty &&
+          event.character!.codeUnitAt(0) >= 32 &&
+          event.character!.codeUnitAt(0) <= 126) {
+        _globalBarcodeBuffer.write(event.character);
+      }
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
-    _refocusSearch();
+    HardwareKeyboard.instance.addHandler(_handleHardwareScanWedge);
+    _loadBusinessBranding();
     widget.alertsController.loadAlerts(silent: true);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _refocusSearch();
       await widget.shiftController.checkActiveShift();
       if (!widget.shiftController.hasActiveShift && mounted) {
         await OpenShiftDialog.show(context, widget.shiftController);
-        _refocusSearch();
+        if (mounted) _refocusSearch();
       }
     });
   }
 
+  Future<void> _loadBusinessBranding() async {
+    try {
+      final config = await DatabaseHelper.instance.getAllConfig();
+      final prefs = await SharedPreferences.getInstance();
+      if (mounted) {
+        setState(() {
+          _currentBusinessName = config['negocio_nombre'] ?? prefs.getString('negocio_nombre') ?? widget.nombreNegocio;
+          _currentBusinessSubtitle = config['negocio_leyenda'] ?? prefs.getString('negocio_leyenda') ?? 'Cerrajería y Electrónica';
+          _currentLogoBase64 = config['logo_base64'] ?? prefs.getString('logo_base64');
+          _pdfSaveDirectory = config['ruta_guardado_pdf'] ?? prefs.getString('ruta_guardado_pdf') ?? r'C:\POS\Cotizaciones';
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareScanWedge);
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  /// Mantiene anclado el foco en la barra de búsqueda / escáner
+  void _switchModule(int index) {
+    if (_activeModuleIndex == index) return;
+    setState(() {
+      _activeModuleIndex = index;
+    });
+    if (index == 0) {
+      _refocusSearch();
+    }
+  }
+
+  void _openSalesHistory() => _switchModule(4);
+
+  /// Mantiene anclado el foco en la barra de búsqueda / escáner de forma 100% segura
   void _refocusSearch() {
+    if (!mounted) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      if (_activeModuleIndex != 0) return;
       final modalRoute = ModalRoute.of(context);
       if (modalRoute != null && !modalRoute.isCurrent) return;
-      if (!_searchFocusNode.hasFocus) {
+      if (_searchFocusNode.canRequestFocus && !_searchFocusNode.hasFocus) {
         _searchFocusNode.requestFocus();
       }
     });
@@ -375,11 +458,13 @@ class _PosScreenState extends State<PosScreen> {
     // Consulta inteligente por código exacto, SKU o coincidencia con comodín %
     final results = await widget.cartController.scanOrSearchProduct(text);
 
-    if (results.length > 1 && mounted) {
-      _showIncrementalSearchResults(results);
-    } else if (results.length == 1 && mounted) {
+    if (!mounted) return;
+
+    if (results.length == 1) {
       await _handleSelectedCatalogItem(results.first);
-    } else if (results.isEmpty && mounted) {
+    } else if (results.length > 1) {
+      await _openAdvancedProductSearch(initialQuery: text);
+    } else if (results.isEmpty) {
       final wantsToAdd = await showDialog<bool>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -414,177 +499,12 @@ class _PosScreenState extends State<PosScreen> {
     _refocusSearch();
   }
 
-  /// Despliega el modal de selección de coincidencias y variantes por molde
-  void _showIncrementalSearchResults(List<Product> products) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-        title: Row(
-          children: [
-            const Icon(Icons.key, color: Color(0xFF1F4E79), size: 20),
-            const SizedBox(width: 8),
-            Text('Coincidencias y Variantes (${products.length})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: 600,
-            maxHeight: MediaQuery.sizeOf(ctx).height * 0.75,
-          ),
-          child: ListView.separated(
-            itemCount: products.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (c, idx) {
-              final prod = products[idx];
-              final isService = prod.esServicio;
-              return ListTile(
-                dense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                title: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        prod.nombre,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                      ),
-                    ),
-                    if (prod.marca != null && prod.marca!.isNotEmpty)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        margin: const EdgeInsets.only(left: 6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFECEFF1),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        child: Text(
-                          prod.marca!,
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF37474F)),
-                        ),
-                      ),
-                  ],
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const SizedBox(height: 3),
-                    Text(
-                      prod.descripcion,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: Colors.black87),
-                    ),
-                    const SizedBox(height: 4),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        DepartmentBadge(departamento: prod.departamento, compact: true),
-                        if (prod.sku != null && prod.sku!.isNotEmpty)
-                          Text('Clave/SKU: ${prod.sku}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF1F4E79))),
-                        if (prod.codigoEquivalencia != null && prod.codigoEquivalencia!.isNotEmpty)
-                          Tooltip(
-                            message: 'Ver todas las variantes del Molde: ${prod.codigoEquivalencia}',
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                onTap: () {
-                                  Navigator.of(ctx).pop();
-                                  _openAdvancedProductSearch(initialQuery: 'molde:${prod.codigoEquivalencia}');
-                                },
-                                borderRadius: BorderRadius.circular(4),
-                                hoverColor: const Color(0xFF1F4E79).withValues(alpha: 0.15),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFFE3F2FD),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: Border.all(color: const Color(0xFF1976D2)),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.link, size: 12, color: Color(0xFF0D47A1)),
-                                      const SizedBox(width: 3),
-                                      Text(
-                                        'Molde: ${prod.codigoEquivalencia}',
-                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF0D47A1)),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        if (prod.ubicacion != null && prod.ubicacion!.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                            decoration: BoxDecoration(
-                              color: Colors.amber.shade50,
-                              borderRadius: BorderRadius.circular(3),
-                              border: Border.all(color: Colors.amber.shade400),
-                            ),
-                            child: Text('📍 ${prod.ubicacion}', style: TextStyle(fontSize: 11, color: Colors.brown.shade900, fontWeight: FontWeight.bold)),
-                          ),
-                        if (!isService)
-                          Text('Stock: ${prod.stockActual}', style: TextStyle(fontSize: 11, color: prod.stockActual <= 5 ? Colors.red : Colors.green.shade800, fontWeight: FontWeight.bold))
-                        else
-                          const Text('⚙️ Servicio', style: TextStyle(fontSize: 11, color: Colors.purple, fontWeight: FontWeight.bold)),
-                      ],
-                    ),
-                  ],
-                ),
-                trailing: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      '\$${prod.precioVenta.toStringAsFixed(2)}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF2E7D32)),
-                    ),
-                    if (prod.precioMayoreo != null && prod.cantidadMayoreo != null)
-                      Text(
-                        'Mayoreo: \$${prod.precioMayoreo!.toStringAsFixed(2)} (+${prod.cantidadMayoreo!.toStringAsFixed(0)})',
-                        style: const TextStyle(fontSize: 10, color: Colors.black54),
-                      ),
-                  ],
-                ),
-                onTap: () async {
-                  Navigator.of(ctx).pop();
-                  await _handleSelectedCatalogItem(prod);
-                },
-              );
-            },
-          ),
-        ),
-      ),
-    ).then((_) => _refocusSearch());
-  }
-
   void _openShiftCutModal() {
-    ShiftCutDialog.show(context, widget.shiftController);
+    ShiftCutDialog.show(context, widget.shiftController, printerService: widget.printerService);
   }
 
   void _openInventoryView() {
-    if (widget.authController.isAdmin) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => InventoryScreen(
-            apiClient: widget.inventoryApiClient,
-            authController: widget.authController,
-          ),
-        ),
-      ).then((_) => _refocusSearch());
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Acceso denegado: Se requiere rol de Administrador para abrir el Catálogo.'),
-          backgroundColor: Color(0xFFD32F2F),
-        ),
-      );
-      _refocusSearch();
-    }
+    _switchModule(3);
   }
 
   /// Abre el modal de cotización digital (F8)
@@ -606,8 +526,12 @@ class _PosScreenState extends State<PosScreen> {
       subtotal: widget.cartController.subtotal,
       descuentoTotal: widget.cartController.descuentoTotal,
       total: widget.cartController.total,
-      nombreNegocio: widget.nombreNegocio,
+      nombreNegocio: _currentBusinessName,
+      leyendaNegocio: _currentBusinessSubtitle,
+      logoBase64: _currentLogoBase64,
+      pdfSaveDirectory: _pdfSaveDirectory,
       clienteNombre: widget.cartController.selectedClientName,
+      printerService: widget.printerService,
     ).then((_) => _refocusSearch());
   }
 
@@ -678,78 +602,106 @@ class _PosScreenState extends State<PosScreen> {
     final currentItemsSnapshot = List<SaleDetailItem>.from(widget.cartController.items);
     final currentSubtotal = widget.cartController.subtotal;
     final currentDescuento = widget.cartController.descuentoTotal;
-    final currentTotal = widget.cartController.total;
+    final currentTotalBeforeCheckout = widget.cartController.total;
     final activeShiftId = widget.shiftController.activeShiftId;
 
-    showDialog<double>(
+    final checkoutResult = await showDialog<CheckoutResult>(
       context: context,
       barrierDismissible: false,
       builder: (_) => CheckoutDialog(
         cartController: widget.cartController,
         corteCajaId: activeShiftId,
       ),
-    ).then((cambio) {
-      if (cambio != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Cobro Exitoso. Cambio: \$${cambio.toStringAsFixed(2)}'),
-            backgroundColor: const Color(0xFF2E7D32),
-            duration: const Duration(seconds: 3),
-          ),
-        );
+    );
 
-        final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().safeSub(7)}';
-        
-        final ticketData = TicketPrintData(
-          negocioNombre: widget.nombreNegocio,
-          folio: folioTicket,
-          fecha: DateTime.now(),
-          cajero: widget.authController.currentUser?.nombre ?? widget.usuarioId,
-          turnoId: activeShiftId,
-          items: currentItemsSnapshot,
-          subtotal: currentSubtotal,
-          descuentoTotal: currentDescuento,
-          total: currentTotal,
-          pagos: [
-            PaymentMethodBreakdown(metodo: 'Liquidado', monto: currentTotal),
-          ],
-          cambio: cambio,
-        );
+    if (checkoutResult != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cobro Exitoso. Cambio: \$${checkoutResult.cambio.toStringAsFixed(2)}'),
+          backgroundColor: const Color(0xFF2E7D32),
+          duration: const Duration(seconds: 3),
+        ),
+      );
 
-        widget.printerService.printSaleTicketAsync(
-          ticketData,
-          openCashDrawer: true,
-        ).then((res) {
-          if (!mounted) return;
-          if (res.success) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(res.message), backgroundColor: const Color(0xFF2E7D32)),
-            );
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(res.message),
-                backgroundColor: Colors.orange.shade800,
-                action: res.plainTextTicket != null
-                    ? SnackBarAction(
-                        label: 'Ver Ticket',
-                        textColor: Colors.white,
-                        onPressed: () {
-                          PrinterService.showThermalPreviewDialog(context, res.plainTextTicket!);
-                        },
-                      )
-                    : null,
-              ),
-            );
-          }
-        });
+      final folioTicket = 'TK-${DateTime.now().millisecondsSinceEpoch.toString().safeSub(7)}';
 
-        // Disparar sincronización inmediata de la venta y actualizar alertas
-        widget.syncWorker.triggerSyncNow();
-        widget.alertsController.loadAlerts(silent: true);
+      final cfg = BusinessConfig.current;
+      final double resolvedTotal = checkoutResult.totalFinal > 0
+          ? checkoutResult.totalFinal
+          : (currentTotalBeforeCheckout + checkoutResult.ajusteRedondeo);
+      final ticketData = TicketPrintData(
+        negocioNombre: cfg.negocioNombre.isNotEmpty ? cfg.negocioNombre : widget.nombreNegocio,
+        negocioLeyenda: cfg.negocioLeyenda,
+        rfc: cfg.negocioRfc,
+        direccion: cfg.negocioDireccion,
+        telefono: cfg.negocioTelefono,
+        mensajeSuperior: cfg.ticketHeader,
+        folio: folioTicket,
+        fecha: DateTime.now(),
+        cajero: widget.authController.currentUser?.nombre ?? widget.usuarioId,
+        turnoId: activeShiftId,
+        clienteNombre: widget.cartController.selectedClientName,
+        items: currentItemsSnapshot,
+        subtotal: currentSubtotal,
+        descuentoTotal: currentDescuento,
+        total: resolvedTotal,
+        ajusteRedondeo: checkoutResult.ajusteRedondeo,
+        pagos: checkoutResult.pagos.isNotEmpty
+            ? checkoutResult.pagos
+            : [
+                PaymentMethodBreakdown(metodo: 'Liquidado', monto: resolvedTotal),
+              ],
+        cambio: checkoutResult.cambio,
+        piePagina: cfg.ticketFooter,
+        garantia: cfg.ticketGarantia,
+        notasTicket: checkoutResult.notasTicket,
+        fontFamily: cfg.ticketFontFamily,
+        mostrarLogo: cfg.ticketMostrarLogo,
+        mostrarNombre: cfg.ticketMostrarNombre,
+        mostrarContacto: cfg.ticketMostrarContacto,
+        mostrarFolioFecha: cfg.ticketMostrarFolioFecha,
+        mostrarCajero: cfg.ticketMostrarCajero,
+        mostrarCliente: cfg.ticketMostrarCliente,
+        mostrarDescuentosRedondeo: cfg.ticketMostrarDescuentosRedondeo,
+        mostrarTotalLetra: cfg.ticketMostrarTotalLetra,
+        mostrarCodigoBarras: cfg.ticketMostrarCodigoBarras,
+      );
+
+      final res = await widget.printerService.printSaleTicketAsync(
+        ticketData,
+        openCashDrawer: true,
+      );
+
+      if (mounted) {
+        if (res.success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(res.message), backgroundColor: const Color(0xFF2E7D32)),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res.message),
+              backgroundColor: Colors.orange.shade800,
+              action: res.plainTextTicket != null
+                  ? SnackBarAction(
+                      label: 'Ver Ticket',
+                      textColor: Colors.white,
+                      onPressed: () {
+                        PrinterService.showThermalPreviewDialog(context, res.plainTextTicket!);
+                      },
+                    )
+                  : null,
+            ),
+          );
+        }
       }
-      _refocusSearch();
-    });
+
+      // Disparar sincronización inmediata de la venta y actualizar alertas
+      widget.syncWorker.triggerSyncNow();
+      widget.alertsController.loadAlerts(silent: true);
+    }
+
+    _refocusSearch();
   }
 
   Future<void> _handleHoldSaleWithAlias() async {
@@ -928,38 +880,7 @@ class _PosScreenState extends State<PosScreen> {
     }
   }
 
-  Future<void> _openSalesHistory() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SalesHistoryScreen(
-          authController: widget.authController,
-          printerService: widget.printerService,
-          activeShiftId: widget.shiftController.activeShiftId,
-        ),
-      ),
-    );
-    _refocusSearch();
-  }
 
-  Future<void> _openClientsScreen() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ClientsScreen(
-          shiftController: widget.shiftController,
-        ),
-      ),
-    );
-    _refocusSearch();
-  }
-
-  Future<void> _openSettingsScreen() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SettingsScreen(printerService: widget.printerService),
-      ),
-    );
-    _refocusSearch();
-  }
 
   Future<void> _showPriceTierMenu(SaleDetailItem item) async {
     if (item.productoId == 'ART-COMUN') return;
@@ -968,171 +889,13 @@ class _PosScreenState extends State<PosScreen> {
         await widget.cartController.salesRepository.findProductByBarcodeOrSku(item.sku ?? item.productoId);
     if (!mounted) return;
 
-    final baseProd = prod ?? Product(
-      id: item.productoId,
-      nombre: item.nombre,
-      descripcion: item.descripcion,
-      precioCompra: item.costoHistorico,
-      precioVenta: item.precioHistorico,
-      stockActual: item.stockDisponible,
-    );
-
-    final selected = await showModalBottomSheet<String>(
+    await UnifiedPricingDialog.show(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(ctx).height * 0.85,
-              maxWidth: 540,
-            ),
-            child: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      'Seleccionar Nivel de Precio para:\n${item.nombre}',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                    ),
-              const SizedBox(height: 12),
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.people, color: Color(0xFF2E7D32)),
-                title: const Text('Precio 1: Público Casual'),
-                trailing: Text('\$${baseProd.precioVenta.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                selected: item.etiquetaPrecio == 'Público',
-                onTap: () => Navigator.pop(ctx, 'Público'),
-              ),
-              if (baseProd.precioCerrajero != null && baseProd.precioCerrajero! > 0)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.vpn_key, color: Color(0xFF0D47A1)),
-                  title: const Text('Precio 2: Colega Cerrajero / Gremio'),
-                  trailing: Text('\$${baseProd.precioCerrajero!.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  selected: item.etiquetaPrecio == 'Cerrajero',
-                  onTap: () => Navigator.pop(ctx, 'Cerrajero'),
-                ),
-              if (baseProd.precioTaller != null && baseProd.precioTaller! > 0)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.build, color: Color(0xFF4A148C)),
-                  title: const Text('Precio 3: Taller Automotriz / Especial'),
-                  trailing: Text('\$${baseProd.precioTaller!.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  selected: item.etiquetaPrecio == 'Taller',
-                  onTap: () => Navigator.pop(ctx, 'Taller'),
-                ),
-              if (baseProd.precioMayoreo != null && baseProd.precioMayoreo! > 0)
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.inventory, color: Color(0xFFE65100)),
-                  title: Text('Precio 4: Mayoreo (volumen >= ${baseProd.cantidadMayoreo ?? 5})'),
-                  trailing: Text('\$${baseProd.precioMayoreo!.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                  selected: item.etiquetaPrecio == 'Mayoreo',
-                  onTap: () => Navigator.pop(ctx, 'Mayoreo'),
-                ),
-              const Divider(height: 12),
-              if (item.esServicio) ...[
-                ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.tune, color: Color(0xFF00838F)),
-                  title: const Text('Modificar precio e insumo ocupado...'),
-                  subtitle: const Text('Editar precio unitario, cantidad de servicios e insumos consumidos'),
-                  onTap: () => Navigator.pop(ctx, 'EditService'),
-                ),
-                const Divider(height: 12),
-              ],
-              ListTile(
-                dense: true,
-                leading: const Icon(Icons.edit, color: Color(0xFF37474F)),
-                title: const Text('Escribir otro precio manualmente...'),
-                selected: item.etiquetaPrecio == 'Manual',
-                onTap: () => Navigator.pop(ctx, 'Manual'),
-              ),
-            ],
-          ),
-        ),
-        ),
-        ),
-        );
-      },
+      cartController: widget.cartController,
+      item: item,
+      product: prod,
+      isGlobal: false,
     );
-
-    if (selected == 'EditService' && mounted) {
-      await EditServiceLineDialog.show(
-        context: context,
-        item: item,
-        cartController: widget.cartController,
-      );
-      _refocusSearch();
-      return;
-    }
-
-    if (selected == 'Manual' && mounted) {
-      final manualCtrl = TextEditingController(text: item.precioHistorico.toStringAsFixed(2));
-      manualCtrl.selection = TextSelection(baseOffset: 0, extentOffset: manualCtrl.text.length);
-      final manualPrice = await showDialog<double>(
-        context: context,
-        builder: (dCtx) => AlertDialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          title: Text('Precio Manual: ${item.nombre}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
-          content: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: 320,
-              maxHeight: MediaQuery.sizeOf(dCtx).height * 0.75,
-            ),
-            child: SingleChildScrollView(
-              child: TextField(
-              controller: manualCtrl,
-              autofocus: true,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
-              decoration: const InputDecoration(
-                labelText: 'Precio unitario',
-                prefixText: '\$ ',
-                border: OutlineInputBorder(),
-              ),
-              onSubmitted: (v) => Navigator.pop(dCtx, double.tryParse(v)),
-            ),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Cancelar')),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1F4E79), foregroundColor: Colors.white),
-              onPressed: () => Navigator.pop(dCtx, double.tryParse(manualCtrl.text)),
-              child: const Text('Aplicar'),
-            ),
-          ],
-        ),
-      );
-      if (manualPrice != null && manualPrice >= 0) {
-        widget.cartController.changeItemPriceTier(item.id, manualPrice, 'Manual');
-      }
-      _refocusSearch();
-      return;
-    }
-
-    if (selected != null) {
-      double chosenPrice = baseProd.precioVenta;
-      if (selected == 'Cerrajero' && baseProd.precioCerrajero != null) {
-        chosenPrice = baseProd.precioCerrajero!;
-      } else if (selected == 'Taller' && baseProd.precioTaller != null) {
-        chosenPrice = baseProd.precioTaller!;
-      } else if (selected == 'Mayoreo' && baseProd.precioMayoreo != null) {
-        chosenPrice = baseProd.precioMayoreo!;
-      }
-
-      widget.cartController.changeItemPriceTier(item.id, chosenPrice, selected);
-    }
     _refocusSearch();
   }
 
@@ -1142,7 +905,6 @@ class _PosScreenState extends State<PosScreen> {
       MaterialPageRoute(
         builder: (_) => LoginScreen(
           authController: widget.authController,
-          posAppTarget: widget, 
         ),
       ),
     );
@@ -1152,30 +914,44 @@ class _PosScreenState extends State<PosScreen> {
   Widget build(BuildContext context) {
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.f1): AdvancedSearchIntent(),
-        SingleActivator(LogicalKeyboardKey.f2): CommonArticleIntent(),
-        SingleActivator(LogicalKeyboardKey.f3): OpenInventoryIntent(),
-        SingleActivator(LogicalKeyboardKey.f4): ShiftCutIntent(),
+        SingleActivator(LogicalKeyboardKey.f1): ModuleVentasIntent(),
+        SingleActivator(LogicalKeyboardKey.f2): ModuleClientesIntent(),
+        SingleActivator(LogicalKeyboardKey.f3): ModuleProductosIntent(),
+        SingleActivator(LogicalKeyboardKey.f4): ModuleInventarioIntent(),
+        SingleActivator(LogicalKeyboardKey.f5): ModuleHistorialIntent(),
         SingleActivator(LogicalKeyboardKey.f6): HoldSaleIntent(),
         SingleActivator(LogicalKeyboardKey.f7): ViewHeldSalesIntent(),
         SingleActivator(LogicalKeyboardKey.f8): QuoteIntent(),
         SingleActivator(LogicalKeyboardKey.f9): CashMovementIntent(),
-        SingleActivator(LogicalKeyboardKey.f10): SalesHistoryIntent(),
+        SingleActivator(LogicalKeyboardKey.f10): CommonArticleIntent(),
+        SingleActivator(LogicalKeyboardKey.f11): ShiftCutIntent(),
         SingleActivator(LogicalKeyboardKey.f12): CheckoutIntent(),
         SingleActivator(LogicalKeyboardKey.delete, alt: true): ClearCartIntent(),
       },
       child: Actions(
         actions: <Type, Action<Intent>>{
-          AdvancedSearchIntent: CallbackAction<AdvancedSearchIntent>(onInvoke: (_) {
-            _openAdvancedProductSearch();
+          ModuleVentasIntent: CallbackAction<ModuleVentasIntent>(onInvoke: (_) {
+            if (_activeModuleIndex != 0) {
+              _switchModule(0);
+            } else {
+              _openAdvancedProductSearch();
+            }
             return null;
           }),
-          CommonArticleIntent: CallbackAction<CommonArticleIntent>(onInvoke: (_) {
-            CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
+          ModuleClientesIntent: CallbackAction<ModuleClientesIntent>(onInvoke: (_) {
+            _switchModule(1);
             return null;
           }),
-          OpenInventoryIntent: CallbackAction<OpenInventoryIntent>(onInvoke: (_) {
+          ModuleProductosIntent: CallbackAction<ModuleProductosIntent>(onInvoke: (_) {
+            _switchModule(2);
+            return null;
+          }),
+          ModuleInventarioIntent: CallbackAction<ModuleInventarioIntent>(onInvoke: (_) {
             _openInventoryView();
+            return null;
+          }),
+          ModuleHistorialIntent: CallbackAction<ModuleHistorialIntent>(onInvoke: (_) {
+            _openSalesHistory();
             return null;
           }),
           ShiftCutIntent: CallbackAction<ShiftCutIntent>(onInvoke: (_) {
@@ -1198,11 +974,12 @@ class _PosScreenState extends State<PosScreen> {
             _openCashMovement();
             return null;
           }),
-          SalesHistoryIntent: CallbackAction<SalesHistoryIntent>(onInvoke: (_) {
-            _openSalesHistory();
+          CommonArticleIntent: CallbackAction<CommonArticleIntent>(onInvoke: (_) {
+            CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
             return null;
           }),
           CheckoutIntent: CallbackAction<CheckoutIntent>(onInvoke: (_) {
+            if (_activeModuleIndex != 0) _switchModule(0);
             _triggerCheckout();
             return null;
           }),
@@ -1215,6 +992,7 @@ class _PosScreenState extends State<PosScreen> {
         child: Focus(
           autofocus: true,
           onKeyEvent: (node, event) {
+            if (_activeModuleIndex != 0) return KeyEventResult.ignored;
             // Manejo de teclas '+' y '-' para modificar ágilmente el último ítem
             if (event is KeyDownEvent) {
               if (event.logicalKey == LogicalKeyboardKey.numpadAdd ||
@@ -1238,29 +1016,50 @@ class _PosScreenState extends State<PosScreen> {
                   final isWide = constraints.maxWidth >= 900;
                   return Column(
                     children: [
-                      _buildHeaderBar(),
+                      // Barra Superior de Módulos (App Shell estilo Eleventa Modernizado)
+                      _buildTopAppShellBar(),
                       Expanded(
-                        child: isWide
-                            ? Row(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                children: [
-                                  Expanded(flex: 7, child: _buildActiveTicketTable()),
-                                  SizedBox(
-                                    width: (constraints.maxWidth * 0.28).clamp(300.0, 360.0),
-                                    child: SingleChildScrollView(
-                                      child: _buildRightLiquidationPanel(),
-                                    ),
-                                  ),
-                                ],
-                              )
-                            : Column(
-                                children: [
-                                  Expanded(child: _buildActiveTicketTable()),
-                                  _buildCompactLiquidationBar(),
-                                ],
-                              ),
+                        child: IndexedStack(
+                          index: _activeModuleIndex,
+                          children: [
+                            // 0: Ventas (F1)
+                            _buildVentasWorkspace(isWide, constraints),
+                            // 1: Clientes (F2)
+                            ClientsScreen(
+                              shiftController: widget.shiftController,
+                              showAppBar: false,
+                            ),
+                            // 2: Productos (F3)
+                            InventoryScreen(
+                              apiClient: widget.inventoryApiClient,
+                              authController: widget.authController,
+                              initialTabIndex: 0,
+                              showAppBar: false,
+                            ),
+                            // 3: Inventario (F4)
+                            InventoryScreen(
+                              apiClient: widget.inventoryApiClient,
+                              authController: widget.authController,
+                              initialTabIndex: 1,
+                              showAppBar: false,
+                            ),
+                            // 4: Historial / Facturas
+                            SalesHistoryScreen(
+                              authController: widget.authController,
+                              printerService: widget.printerService,
+                              activeShiftId: widget.shiftController.activeShiftId,
+                              showAppBar: false,
+                            ),
+                            // 5: Configuración
+                            SettingsScreen(
+                              printerService: widget.printerService,
+                              cartController: widget.cartController,
+                              showAppBar: false,
+                              onSettingsSaved: _loadBusinessBranding,
+                            ),
+                          ],
+                        ),
                       ),
-                      _buildKeyboardShortcutsFooter(),
                     ],
                   );
                 },
@@ -1272,8 +1071,227 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
+  Widget _buildVentasWorkspace(bool isWide, BoxConstraints constraints) {
+    return Column(
+      children: [
+        _buildHeaderBar(),
+        Expanded(
+          child: isWide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(flex: 7, child: _buildActiveTicketTable()),
+                    SizedBox(
+                      width: (constraints.maxWidth * 0.28).clamp(300.0, 360.0),
+                      child: SingleChildScrollView(
+                        child: _buildRightLiquidationPanel(),
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  children: [
+                    Expanded(child: _buildActiveTicketTable()),
+                    _buildCompactLiquidationBar(),
+                  ],
+                ),
+        ),
+      ],
+    );
+  }
+
   // ---------------------------------------------------------------------------
-  // BARRA SUPERIOR DE ENTRADA / ESCÁNER
+  // BARRA SUPERIOR DE MÓDULOS PRINCIPALES (APP SHELL ESTILO ELEVENTA)
+  // ---------------------------------------------------------------------------
+  Widget _buildTopAppShellBar() {
+    return Container(
+      height: 52,
+      color: const Color(0xFF1F4E79),
+      padding: const EdgeInsets.symmetric(horizontal: 12.0),
+      child: Row(
+        children: [
+          // Logo + Nombre y Leyenda del Negocio (a la izquierda, compacto)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_currentLogoBase64 != null && _currentLogoBase64!.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.memory(
+                    base64Decode(_currentLogoBase64!),
+                    width: 30,
+                    height: 30,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.point_of_sale, color: Color(0xFFFFB74D), size: 22),
+                  ),
+                )
+              else
+                const Icon(Icons.point_of_sale, color: Color(0xFFFFB74D), size: 22),
+              const SizedBox(width: 8),
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _currentBusinessName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  Text(
+                    _currentBusinessSubtitle,
+                    style: const TextStyle(
+                      color: Color(0xFFFFB74D),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(width: 14),
+          const VerticalDivider(color: Colors.white24, indent: 12, endIndent: 12),
+          const SizedBox(width: 6),
+
+          // Pestañas Principales (Ventas, Productos, Historial, Configuración, Corte)
+          // Protegido con SingleChildScrollView para garantizar que JAMÁS se oculte Configuración
+          Flexible(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _buildModuleNavButton(
+                    index: 0,
+                    icon: Icons.shopping_cart_outlined,
+                    label: 'F1 Ventas',
+                  ),
+                  const SizedBox(width: 4),
+                  _buildModuleNavButton(
+                    index: 2,
+                    icon: Icons.sell_outlined,
+                    label: 'F3 Productos',
+                  ),
+                  const SizedBox(width: 4),
+                  _buildModuleNavButton(
+                    index: 4,
+                    icon: Icons.receipt_long_outlined,
+                    label: 'Historial',
+                  ),
+                  const SizedBox(width: 4),
+                  _buildModuleNavButton(
+                    index: 5,
+                    icon: Icons.settings_outlined,
+                    label: 'Configuración',
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFFFB74D),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.monetization_on_outlined, size: 16),
+                    label: const Text(
+                      '🧮 Corte',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    onPressed: _openShiftCutModal,
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Indicadores del Extremo Derecho
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Usuario activo (👤 Sesión: Nombre sin redundancias)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person, size: 15, color: Colors.white70),
+                    const SizedBox(width: 5),
+                    Text(
+                      widget.authController.currentUser?.nombre ?? widget.usuarioId,
+                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Alertas Predictivas
+              StockAlertsButton(alertsController: widget.alertsController),
+              const SizedBox(width: 8),
+
+              // Sincronización Outbox
+              SyncStatusBadge(syncWorker: widget.syncWorker),
+              const SizedBox(width: 8),
+
+              // Bloqueo / Salir
+              IconButton(
+                icon: const Icon(Icons.lock_outline, color: Color(0xFFFF8A80), size: 20),
+                tooltip: 'Bloquear Terminal / Salir',
+                onPressed: _handleLogout,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildModuleNavButton({
+    required int index,
+    required IconData icon,
+    required String label,
+  }) {
+    final isSelected = _activeModuleIndex == index;
+    return Material(
+      color: isSelected ? Colors.white : Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => _switchModule(index),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isSelected ? const Color(0xFF1F4E79) : Colors.white,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                  color: isSelected ? const Color(0xFF1F4E79) : Colors.white,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // BARRA DE VENTAS DESATURADA (F1 VENTAS)
   // ---------------------------------------------------------------------------
   Widget _buildHeaderBar() {
     return Container(
@@ -1281,133 +1299,190 @@ class _PosScreenState extends State<PosScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
       child: Row(
         children: [
-          // Asignación de Cliente
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF1F4E79),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              side: const BorderSide(color: Color(0xFFCFD8DC)),
-            ),
-            icon: const Icon(Icons.person_outline, size: 20),
-            label: AnimatedBuilder(
-              animation: widget.cartController,
-              builder: (context, _) => Text(
-                widget.cartController.selectedClientName,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              ),
-            ),
-            onPressed: () async {
-              final selectedClient = await ClientSelectionDialog.show(context);
-              if (selectedClient != null && mounted) {
-                widget.cartController.setClient(selectedClient.id, selectedClient.nombre);
-              }
-              _refocusSearch();
+          // 1. Botón Limpio de Cliente asignado al ticket actual (Público en General)
+          AnimatedBuilder(
+            animation: widget.cartController,
+            builder: (context, _) {
+              final isPublic = widget.cartController.selectedClientId == 'PUBLICO-GRAL';
+              final tier = widget.cartController.selectedClientTier;
+              final isSpecialTier = tier != 'Público';
+
+              return ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 240, minWidth: 150),
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isPublic ? Colors.white : const Color(0xFFE8F5E9),
+                    foregroundColor: const Color(0xFF1F4E79),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                    side: BorderSide(
+                      color: isPublic ? const Color(0xFFCFD8DC) : const Color(0xFF2E7D32),
+                      width: isPublic ? 1.0 : 1.5,
+                    ),
+                    elevation: 0,
+                  ),
+                  onPressed: () async {
+                    final selectedClient = await ClientSelectionDialog.show(
+                      context,
+                      onNavigateToClientsModule: () {
+                        setState(() => _activeModuleIndex = 1);
+                      },
+                    );
+                    if (!mounted) return;
+                    if (selectedClient != null) {
+                      widget.cartController.setClient(
+                        selectedClient.id,
+                        selectedClient.nombre,
+                        tier: selectedClient.tarifaPreferencial,
+                      );
+                    }
+                    await Future.delayed(const Duration(milliseconds: 100));
+                    if (mounted) _refocusSearch();
+                  },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isPublic ? Icons.storefront : Icons.person,
+                        size: 18,
+                        color: isPublic ? const Color(0xFF1F4E79) : const Color(0xFF2E7D32),
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              widget.cartController.selectedClientName,
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (isSpecialTier)
+                              Text(
+                                'Tarifa: $tier',
+                                style: const TextStyle(fontSize: 10, color: Color(0xFF0D47A1), fontWeight: FontWeight.bold),
+                              ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.arrow_drop_down, size: 18, color: Colors.blueGrey),
+                    ],
+                  ),
+                ),
+              );
             },
           ),
           const SizedBox(width: 12),
 
-          // Campo de búsqueda inteligente (Soporta comodín %)
+          // 2. Barra de Búsqueda / Escáner amplia y cómoda
           Expanded(
             child: TextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
               textInputAction: TextInputAction.go,
               style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 isDense: true,
                 hintText: 'Clave/SKU, Barra, Nombre o con % (ej. %jetta, %phillips)... [F1]',
-                prefixIcon: Icon(Icons.search, color: Color(0xFF1F4E79)),
-                border: OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.search, color: Color(0xFF1F4E79)),
+                border: const OutlineInputBorder(),
                 filled: true,
-                fillColor: Color(0xFFF9FAFB),
+                fillColor: const Color(0xFFF9FAFB),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          _refocusSearch();
+                        },
+                      )
+                    : null,
               ),
               onSubmitted: _handleBarcodeScan,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
 
-          // Iconos de acción con scroll horizontal para pantallas táctiles estrechas
-          Flexible(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.manage_search, color: Color(0xFF1F4E79)),
-                    tooltip: 'Buscar [F1]',
-                    onPressed: _openAdvancedProductSearch,
-                  ),
-
-          // Clientes y Créditos
-          IconButton(
-            icon: const Icon(Icons.people_alt_outlined, color: Color(0xFF1F4E79)),
-            tooltip: 'Clientes y Créditos',
-            onPressed: _openClientsScreen,
-          ),
-
-          // Historial de Ventas [F10]
-          IconButton(
-            icon: const Icon(Icons.history_outlined, color: Color(0xFF1F4E79)),
-            tooltip: 'Historial y Devoluciones [F10]',
-            onPressed: _openSalesHistory,
-          ),
-
-          // Movimiento de Caja [F9]
-          IconButton(
-            icon: const Icon(Icons.swap_horiz, color: Color(0xFF1F4E79)),
-            tooltip: 'Entrada / Salida de Efectivo [F9]',
-            onPressed: _openCashMovement,
-          ),
-
-          // Acceso a Inventario Offline (F3)
-          if (widget.authController.isAdmin)
-            IconButton(
-              icon: const Icon(Icons.inventory_2_outlined, color: Color(0xFF1F4E79)),
-              tooltip: 'Inventario Dinámico [F3]',
-              onPressed: _openInventoryView,
-            ),
-
-          // Corte de Caja (F4)
-          IconButton(
-            icon: const Icon(Icons.point_of_sale, color: Color(0xFF1F4E79)),
-            tooltip: 'Corte de Caja [F4]',
-            onPressed: _openShiftCutModal,
-          ),
-
-          // Configuración del Sistema
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Color(0xFF1F4E79)),
-            tooltip: 'Configuración del Negocio',
-            onPressed: _openSettingsScreen,
-          ),
-          const SizedBox(width: 4),
-
-          // Alertas de Escasez BI
-          StockAlertsButton(alertsController: widget.alertsController),
-          const SizedBox(width: 8),
-
-          // Indicador de Sincronización Outbox
-          SyncStatusBadge(syncWorker: widget.syncWorker),
-          const SizedBox(width: 8),
-
-          // Botón de Bloqueo / Logout
-          Container(
-            height: 36,
-            decoration: const BoxDecoration(
-              border: Border(left: BorderSide(color: Colors.black12)),
-            ),
-            padding: const EdgeInsets.only(left: 8.0),
-            child: IconButton(
-              icon: const Icon(Icons.lock_outline, color: Color(0xFFD32F2F)),
-              tooltip: 'Bloquear Terminal / Cerrar Sesión',
-              onPressed: _handleLogout,
-            ),
-          ),
-                ],
+          // 3. Botones rápidos exclusivos de la operación de caja
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Buscar [F1]
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1F4E79),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  elevation: 0,
+                ),
+                icon: const Icon(Icons.search, size: 18),
+                label: const Text('Buscar [F1]', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: _openAdvancedProductSearch,
               ),
-            ),
+              const SizedBox(width: 8),
+
+              // Art. Común
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1F4E79),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  side: const BorderSide(color: Color(0xFFCFD8DC)),
+                ),
+                icon: const Icon(Icons.add_shopping_cart, size: 18),
+                label: const Text('[F10] Art. Común', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: () {
+                  CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
+                },
+              ),
+              const SizedBox(width: 8),
+
+              // Entradas / Salidas
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1F4E79),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  side: const BorderSide(color: Color(0xFFCFD8DC)),
+                ),
+                icon: const Icon(Icons.swap_horiz, size: 18),
+                label: const Text('[F9] Entradas/Salidas', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: _openCashMovement,
+              ),
+              const SizedBox(width: 8),
+
+              // Pausar [F6]
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFE65100),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  side: const BorderSide(color: Color(0xFFFFCC80)),
+                ),
+                icon: const Icon(Icons.pause_circle_outline, size: 18),
+                label: const Text('Pausar [F6]', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: _handleHoldSaleWithAlias,
+              ),
+              const SizedBox(width: 8),
+
+              // Pausados (N) [F7]
+              AnimatedBuilder(
+                animation: widget.cartController,
+                builder: (context, _) {
+                  final count = widget.cartController.heldSalesCount;
+                  return ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: count > 0 ? const Color(0xFFE65100) : Colors.grey.shade200,
+                      foregroundColor: count > 0 ? Colors.white : Colors.black54,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                      elevation: count > 0 ? 1 : 0,
+                    ),
+                    icon: const Icon(Icons.folder_open, size: 18),
+                    label: Text('Pausados ($count) [F7]', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                    onPressed: _showHeldSalesModal,
+                  );
+                },
+              ),
+            ],
           ),
         ],
       ),
@@ -1534,7 +1609,83 @@ class _PosScreenState extends State<PosScreen> {
                       ),
                     ),
                     const SizedBox(width: 100, child: Text('TOTAL', textAlign: TextAlign.right, style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 40),
+                    SizedBox(
+                      width: 40,
+                      child: IconButton(
+                        icon: const Icon(Icons.delete_sweep_outlined, color: Color(0xFFFF8A80), size: 18),
+                        tooltip: 'Limpiar ticket completo [Alt+Supr]',
+                        onPressed: () {
+                          if (widget.cartController.isNotEmpty) {
+                            showDialog(
+                              context: context,
+                              builder: (ctx) => AlertDialog(
+                                title: const Text('¿Limpiar ticket?'),
+                                content: const Text('Se eliminarán todos los artículos del ticket actual.'),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                                    onPressed: () {
+                                      widget.cartController.clear();
+                                      Navigator.pop(ctx);
+                                      _refocusSearch();
+                                    },
+                                    child: const Text('Limpiar'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Barra de Utilidades Rápidas de la Tabla (Mayoreo Auto ON/OFF)
+              Container(
+                color: const Color(0xFFF1F5F9),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    InkWell(
+                      onTap: () => widget.cartController.toggleMayoreoAuto(),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: widget.cartController.mayoreoAutoEnabled ? const Color(0xFFE8F5E9) : const Color(0xFFEEEEEE),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: widget.cartController.mayoreoAutoEnabled ? const Color(0xFFA5D6A7) : Colors.grey.shade400,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              widget.cartController.mayoreoAutoEnabled ? Icons.bolt : Icons.flash_off,
+                              size: 14,
+                              color: widget.cartController.mayoreoAutoEnabled ? const Color(0xFF2E7D32) : Colors.grey.shade600,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Mayoreo Auto: ${widget.cartController.mayoreoAutoEnabled ? 'ENCENDIDO' : 'APAGADO'}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: widget.cartController.mayoreoAutoEnabled ? const Color(0xFF1B5E20) : Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${items.length} partida${items.length == 1 ? "" : "s"} en ticket | Alt+Supr para limpiar',
+                      style: const TextStyle(fontSize: 11, color: Colors.blueGrey),
+                    ),
                   ],
                 ),
               ),
@@ -1756,14 +1907,14 @@ class _PosScreenState extends State<PosScreen> {
                             ),
                           ),
 
-                          // Precio Unitario Interactivo con Selector de Nivel
+                          // P. Unitario con Gestor Unificado PopOver
                           SizedBox(
-                            width: 130,
+                            width: 110,
                             child: InkWell(
-                              borderRadius: BorderRadius.circular(4),
                               onTap: () => _showPriceTierMenu(item),
+                              borderRadius: BorderRadius.circular(4),
                               child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: Colors.blueGrey.shade50,
                                   borderRadius: BorderRadius.circular(4),
@@ -1777,7 +1928,7 @@ class _PosScreenState extends State<PosScreen> {
                                       mainAxisAlignment: MainAxisAlignment.end,
                                       children: [
                                         Text(
-                                          '\$${item.precioHistorico.toStringAsFixed(2)}',
+                                          '\$${(item.cantidad > 0 ? (item.totalLinea / item.cantidad) : item.precioHistorico).toStringAsFixed(2)}',
                                           textAlign: TextAlign.right,
                                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                                         ),
@@ -1788,17 +1939,21 @@ class _PosScreenState extends State<PosScreen> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                       decoration: BoxDecoration(
-                                        color: item.etiquetaPrecio == 'Cerrajero'
+                                        color: item.etiquetaPrecio.contains('Cerrajero')
                                             ? const Color(0xFF0D47A1)
-                                            : item.etiquetaPrecio == 'Taller'
+                                            : item.etiquetaPrecio.contains('Taller')
                                                 ? const Color(0xFF4A148C)
-                                                : item.etiquetaPrecio == 'Mayoreo'
+                                                : item.etiquetaPrecio.contains('Mayoreo')
                                                     ? const Color(0xFFE65100)
-                                                    : const Color(0xFF2E7D32),
+                                                    : item.etiquetaPrecio.contains('Manual')
+                                                        ? const Color(0xFF37474F)
+                                                        : const Color(0xFF2E7D32),
                                         borderRadius: BorderRadius.circular(2),
                                       ),
                                       child: Text(
                                         item.etiquetaPrecio,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
                                       ),
                                     ),
@@ -2018,12 +2173,21 @@ class _PosScreenState extends State<PosScreen> {
                     FittedBox(
                       fit: BoxFit.scaleDown,
                       child: Text(
-                        '\$${total.toStringAsFixed(2)}',
+                        '\$${calcularRedondeoEfectivo(total).toStringAsFixed(2)}',
                         style: const TextStyle(
                           fontSize: 40,
                           fontWeight: FontWeight.bold,
                           color: Colors.white,
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Exacto: \$${total.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ],
@@ -2052,91 +2216,120 @@ class _PosScreenState extends State<PosScreen> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // FOOTER DE ACCIONES RÁPIDAS Y ATAJOS DE TECLADO
-  // ---------------------------------------------------------------------------
-  Widget _buildKeyboardShortcutsFooter() {
-    return AnimatedBuilder(
-      animation: widget.cartController,
-      builder: (context, _) {
-        final heldCount = widget.cartController.heldSales.length;
-        final hasHeld = heldCount > 0;
 
-        return Container(
-          color: const Color(0xFF263238),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Wrap(
-            spacing: 10,
-            runSpacing: 6,
-            alignment: WrapAlignment.center,
-            children: [
-              _buildKeyBadge('F1', 'Buscar', _openAdvancedProductSearch),
-              _buildKeyBadge('F2', 'Art. Común', () {
-                CommonArticleDialog.show(context, widget.cartController).then((_) => _refocusSearch());
-              }),
-              if (widget.authController.isAdmin)
-                _buildKeyBadge('F3', 'Inventario', _openInventoryView),
-              _buildKeyBadge('F4', 'Corte Caja', _openShiftCutModal),
-              _buildKeyBadge('F6', 'Pausar', _handleHoldSaleWithAlias),
-              _buildKeyBadge(
-                'F7',
-                'Pausados ($heldCount)',
-                _showHeldSalesModal,
-                backgroundColor: hasHeld ? const Color(0xFFE65100) : null,
-                borderColor: hasHeld ? const Color(0xFFFFB74D) : null,
-              ),
-              _buildKeyBadge('F8', 'Cotizar Digital', _openQuoteDialog),
-              _buildKeyBadge('F9', 'E/S Dinero', _openCashMovement),
-              _buildKeyBadge('F10', 'Historial Tickets', _openSalesHistory),
-              _buildKeyBadge('+ / -', 'Cant. Rápida', () {}),
-              _buildKeyBadge('Alt+Supr', 'Limpiar', () {
-                widget.cartController.clearCart();
-                _refocusSearch();
-              }),
-              _buildKeyBadge('F12', 'Cobrar', _triggerCheckout, backgroundColor: const Color(0xFF2E7D32)),
-            ],
-          ),
-        );
-      },
+  // ---------------------------------------------------------------------------
+  // BARRA INFERIOR NO REDUNDANTE DE ACCESOS RÁPIDAS
+  // ---------------------------------------------------------------------------
+  // ignore: unused_element
+  Widget _buildNonRedundantBottomBar() {
+    return Container(
+      height: 38,
+      color: const Color(0xFF263238),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _buildBottomActionItem(
+              keyLabel: 'F2',
+              actionLabel: 'Clientes',
+              icon: Icons.people_outline,
+              onTap: () => _switchModule(1),
+            ),
+            const SizedBox(width: 8),
+            _buildBottomActionItem(
+              keyLabel: 'F4',
+              actionLabel: 'Inventario',
+              icon: Icons.inventory_2_outlined,
+              onTap: _openInventoryView,
+            ),
+            const SizedBox(width: 8),
+            _buildBottomActionItem(
+              keyLabel: 'F8',
+              actionLabel: 'Cotizar',
+              icon: Icons.request_quote_outlined,
+              onTap: _openQuoteDialog,
+            ),
+            const SizedBox(width: 8),
+            _buildBottomActionItem(
+              keyLabel: 'Alt+Supr',
+              actionLabel: 'Limpiar Ticket',
+              icon: Icons.delete_sweep_outlined,
+              onTap: () {
+                if (widget.cartController.isNotEmpty) {
+                  showDialog(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('¿Limpiar ticket?'),
+                      content: const Text('Se eliminarán todos los artículos del ticket actual.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                          onPressed: () {
+                            widget.cartController.clear();
+                            Navigator.pop(ctx);
+                            _refocusSearch();
+                          },
+                          child: const Text('Limpiar'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+              },
+            ),
+            const SizedBox(width: 8),
+            _buildBottomActionItem(
+              keyLabel: 'F12',
+              actionLabel: 'Cobrar',
+              icon: Icons.check_circle_outline,
+              backgroundColor: const Color(0xFF2E7D32),
+              onTap: _triggerCheckout,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildKeyBadge(
-    String keyLabel,
-    String actionLabel,
-    VoidCallback onTap, {
+  Widget _buildBottomActionItem({
+    required String keyLabel,
+    required String actionLabel,
+    required IconData icon,
+    required VoidCallback onTap,
     Color? backgroundColor,
-    Color? borderColor,
   }) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(4),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 38),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: backgroundColor ?? const Color(0xFF37474F),
-          borderRadius: BorderRadius.circular(3),
-          border: borderColor != null ? Border.all(color: borderColor, width: 1.2) : null,
+          borderRadius: BorderRadius.circular(4),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
                 color: Colors.white24,
                 borderRadius: BorderRadius.circular(2),
               ),
               child: Text(
                 keyLabel,
-                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
               ),
             ),
             const SizedBox(width: 6),
+            Icon(icon, size: 14, color: Colors.white),
+            const SizedBox(width: 4),
             Text(
               actionLabel,
-              style: const TextStyle(color: Color(0xFFECEFF1), fontSize: 12),
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ],
         ),

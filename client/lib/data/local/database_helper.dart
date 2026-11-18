@@ -48,6 +48,17 @@ class DatabaseHelper {
   Future<void> _onOpen(Database db) async {
     // Garantiza que los registros semilla permanentes siempre existan
     await DatabaseSeeder.seed(db);
+    // Garantiza la columna de ajuste por redondeo en ventas
+    try {
+      final tableInfoVentas = await db.rawQuery('PRAGMA table_info(ventas);');
+      final ventasCols = tableInfoVentas.map((col) => col['name'] as String).toSet();
+      if (!ventasCols.contains('ajuste_redondeo')) {
+        await db.execute("ALTER TABLE ventas ADD COLUMN ajuste_redondeo REAL DEFAULT 0.0;");
+      }
+      if (!ventasCols.contains('notas_ticket')) {
+        await db.execute("ALTER TABLE ventas ADD COLUMN notas_ticket TEXT;");
+      }
+    } catch (_) {}
     // Auto-bootstrap silencioso de catálogo migrado y clientes
     await _autoBootstrapData(db);
   }
@@ -113,9 +124,11 @@ class DatabaseHelper {
           descuento_total REAL NOT NULL DEFAULT 0.0,
           impuestos_total REAL NOT NULL DEFAULT 0.0,
           total REAL NOT NULL,
+          ajuste_redondeo REAL DEFAULT 0.0,
           pagos_desglose TEXT NOT NULL,
           fecha_venta TEXT NOT NULL,
           estatus TEXT NOT NULL DEFAULT 'completado' CHECK (estatus IN ('completado', 'cancelado')),
+          notas_ticket TEXT,
           FOREIGN KEY (corte_caja_id) REFERENCES cortes_caja(id) ON DELETE RESTRICT
       );''',
       '''CREATE TABLE IF NOT EXISTS detalles_venta (
@@ -296,6 +309,9 @@ class DatabaseHelper {
     }
     if (!ventasCols.contains('cliente_nombre')) {
       await db.execute("ALTER TABLE ventas ADD COLUMN cliente_nombre TEXT DEFAULT 'Público en General';");
+    }
+    if (!ventasCols.contains('ajuste_redondeo')) {
+      await db.execute("ALTER TABLE ventas ADD COLUMN ajuste_redondeo REAL DEFAULT 0.0;");
     }
     await db.execute('CREATE INDEX IF NOT EXISTS idx_ventas_cliente_id ON ventas(cliente_id);');
 
